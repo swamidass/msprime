@@ -1,0 +1,19 @@
+# Conda environment to support building msprime on readthedocs.
+name: msprime-rtd
+
+channels:
+  - conda-forge
+  - defaults
+  - bioconda
+
+dependencies:
+  - setuptools_scm
+  - numpy
+  - hdf5
+  - gsl
+  - six
+  - pip:
+    # sphinx-argparse needs an older version of CommonMark for now.
+    # https://github.com/rtfd/recommonmark/issues/24
+    - CommonMark==0.5.4
+    - sphinx-argparse
