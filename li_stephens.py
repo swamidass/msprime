@@ -46,14 +46,17 @@ class HaplotypeMatcher(object):
             samples = list(self.tree_sequence.samples())
         self.samples = samples
         self.num_sites = tree_sequence.num_sites
+        self.num_nodes = tree_sequence.num_nodes
         self.recombination_rate = recombination_rate
         # Map of tree nodes to likelihoods. We maintain the property that the
         # nodes in this map are non-overlapping; that is, for any u in the map,
         # there is no v that is an ancestor of u.
-        self.likelihood = {}
+        self.likelihood = np.zeros(self.num_nodes) - 1
+        # This is the set of nodes that are currently set in the likelihood map.
+        self.likelihood_nodes = set()
         # We keep a local copy of the parent array to allow us maintain the
         # likelihood map between tree transitions.
-        self.parent = np.zeros(self.tree_sequence.num_nodes, dtype=int) - 1
+        self.parent = np.zeros(self.num_nodes, dtype=int) - 1
         # For each locus, store a set of nodes at which we must recombine during
         # traceback.
         self.traceback = [[] for _ in range(self.num_sites)]
@@ -61,26 +64,29 @@ class HaplotypeMatcher(object):
         self.recombination_dest = np.zeros(self.num_sites, dtype=int) - 1
 
     def reset(self):
-        self.likelihood = {}
+        self.likelihood_nodes = set()
+        self.likelihood[:] = -1
         for u in self.samples:
+            self.likelihood_nodes.add(u)
             self.likelihood[u] = 1.0
         self.parent[:] = -1
         self.traceback = [[] for _ in range(self.num_sites)]
         self.recombination_dest[:] = -1
 
-    def print_state(self):
+    def print_state(self, traceback=True):
         print("HaplotypeMatcher state")
         print("likelihood:")
-        for k, v in self.likelihood.items():
-            print("\t", k, "->", v)
+        for u in sorted(self.likelihood_nodes):
+            print("\t", u, "->", self.likelihood[u])
         print("tree = ", repr(self.tree))
         if self.tree is not None:
             print("\tindex = ", self.tree.index)
             print("\tnum_sites = ", len(list(self.tree.sites())))
             print("\tp = ", self.tree.parent_dict)
-        print("Traceback:")
-        for l in range(self.num_sites):
-            print("\t", l, "\t", self.recombination_dest[l], "\t", self.traceback[l])
+        if traceback:
+            print("Traceback:")
+            for l in range(self.num_sites):
+                print("\t", l, "\t", self.recombination_dest[l], "\t", self.traceback[l])
 
     def check_sample_coverage(self, nodes):
         """
@@ -109,16 +115,14 @@ class HaplotypeMatcher(object):
         # for u in range(P.shape[0]):
         #     if len(C[u]) > 0:
         #         print(u, "->", C[u])
-        L = self.likelihood
-        for u in L.keys():
+        for u in self.likelihood_nodes:
             if u in C:
-                # traverse down from here. We should not meet any other
-                # L values.
+                # traverse down from here. We should not meet any other L values.
                 stack = list(C[u])
                 while len(stack) > 0:
                     v = stack.pop()
                     stack.extend(C[v])
-                    assert v not in L
+                    assert v not in self.likelihood_nodes
 
     def check_state(self):
         # print("AFTER IN:", L_tree)
@@ -126,7 +130,13 @@ class HaplotypeMatcher(object):
         P_dict = {
             u: self.parent[u] for u in range(ts.num_nodes) if self.parent[u] != -1}
         assert self.tree.parent_dict == P_dict
-        self.check_sample_coverage(self.likelihood.keys())
+        self.check_sample_coverage(self.likelihood_nodes)
+        # Check that the likelihood nodes are correctly mapped.
+        for u in self.likelihood_nodes:
+            assert self.likelihood[u] != -1
+        for u in range(self.num_nodes):
+            if self.likelihood[u] != -1:
+                assert u in self.likelihood_nodes
         # print("DONE")
 
     def update_tree_state(self, diff):
@@ -140,20 +150,24 @@ class HaplotypeMatcher(object):
             # print("OUT:", parent, children)
             for c in children:
                 self.parent[c] = msprime.NULL_NODE
-            if parent in self.likelihood:
+            x = self.likelihood[parent]
+            if x != -1:
                 # If we remove a node and it has an L value, then this L value is
                 # mapped to its children.
-                x = self.likelihood.pop(parent)
+                self.likelihood[parent] = -1
+                self.likelihood_nodes.remove(parent)
                 for c in children:
-                    assert c not in self.likelihood
+                    assert self.likelihood[c] == -1
+                    assert c not in self.likelihood_nodes
                     self.likelihood[c] = x
+                    self.likelihood_nodes.add(c)
             else:
                 # The children are now the roots of disconnected subtrees, and
                 # need to be assigned L values. We set these by traversing up
                 # the tree until we find the L value and then set this to the
                 # children.
                 u = parent
-                while u != -1 and u not in self.likelihood:
+                while u != -1 and self.likelihood[u] == -1:
                     u = self.parent[u]
                 # TODO It's not completely clear to me what's happening in the
                 # case where u is -1. The logic of this section can be clarified
@@ -162,8 +176,10 @@ class HaplotypeMatcher(object):
                 if u != -1:
                     x = self.likelihood[u]
                     for c in children:
-                        assert c not in self.likelihood
+                        assert c not in self.likelihood_nodes
+                        assert self.likelihood[c] == -1
                         self.likelihood[c] = x
+                        self.likelihood_nodes.add(c)
 
         self.check_partial_tree_consistency()
 
@@ -177,27 +193,33 @@ class HaplotypeMatcher(object):
             # TODO this is ugly and inefficient. Need a simpler approach.
             L_children = []
             for c in children:
-                if c in self.likelihood:
+                if self.likelihood[c] != -1:
                     L_children.append(self.likelihood[c])
             if len(L_children) == len(children) and len(set(L_children)) == 1:
                 self.likelihood[parent] = self.likelihood[children[0]]
+                self.likelihood_nodes.add(parent)
                 for c in children:
-                    del self.likelihood[c]
+                    self.likelihood_nodes.remove(c)
+                    self.likelihood[c] = -1
             if len(L_children) > 0:
                 # Need to check for conflicts with L values higher in the tree.
                 u = self.parent[parent]
-                while u != msprime.NULL_NODE and u not in self.likelihood:
+                while u != msprime.NULL_NODE and self.likelihood[u] == -1:
                     u = self.parent[u]
                 if u != msprime.NULL_NODE:
                     top = u
-                    x = self.likelihood.pop(top)
+                    x = self.likelihood[u]
+                    self.likelihood[u] = -1
+                    self.likelihood_nodes.remove(u)
                     u = parent
                     while u != top:
                         v = self.parent[u]
                         for w in self.tree.children(v):
                             if w != u:
-                                assert w not in self.likelihood
+                                assert w not in self.likelihood_nodes
+                                assert self.likelihood[w] == -1
                                 self.likelihood[w] = x
+                                self.likelihood_nodes.add(w)
                         u = v
 
     def add_recombination_node(self, site_id, u):
@@ -213,44 +235,52 @@ class HaplotypeMatcher(object):
         """
         # Find a node with L == 1 and register as the recombinant haplotype root.
         found = False
-        for u, value in self.likelihood.items():
+        for u in self.likelihood_nodes:
+            value = self.likelihood[u]
             if value == 1.0:
                 self.recombination_dest[site_id] = u
                 found = True
                 break
         assert found
 
-    def coalesce_equal(self, L):
+    def coalesce_equal(self):
         """
         Coalesce L values into the minimal representation by propagating
         values up the tree and finding the roots of the subtrees sharing
         the same L value.
         """
+        # TODO need to make these algorithms such that they self repair
+        # the V map and so that we automatically null out elements of the
+        # likelihood array that are remove. At the moment we incur two
+        # O(n) operations, which is poor.
         tree = self.tree
         # Coalesce equal values
-        V = {}
+        V = np.zeros(self.num_nodes, dtype=int) - 1
         # Take all the L values an propagate them up the tree.
-        for u in L.keys():
-            x = L[u]
-            while u != msprime.NULL_NODE and u not in V:
+        for u in self.likelihood_nodes:
+            x = self.likelihood[u]
+            while u != msprime.NULL_NODE and V[u] == -1:
                 V[u] = x
                 u = tree.parent(u)
             if u != msprime.NULL_NODE and V[u] != x:
                 # Mark the path up to root as invalid
                 while u!= msprime.NULL_NODE:
-                    V[u] = -1
+                    V[u] = -2
                     u = tree.parent(u)
         W = {}
         # Get the distinct roots from L in V
-        for u in L.keys():
+        S = set(self.likelihood_nodes)
+        self.likelihood[:] = -1
+        self.likelihood_nodes = set()
+        for u in S:
             x = V[u]
             last_u = u
-            while u != msprime.NULL_NODE and V[u] != -1:
+            while u != msprime.NULL_NODE and V[u] != -2:
                 last_u = u
                 u = tree.parent(u)
-            if x != -1:
-                W[last_u] = x
-        return W
+            if x != -2:
+                self.likelihood[last_u] = x
+                self.likelihood_nodes.add(last_u)
 
     def update_site(self, site, state):
         """
@@ -266,28 +296,35 @@ class HaplotypeMatcher(object):
         no_recomb_proba = 1 - r + r / n
 
         L = self.likelihood
+        S = self.likelihood_nodes
         tree = self.tree
+        S_next = set()
         # Update L to add nodes for the mutation node, splitting and removing
         # existing L nodes as necessary.
-        L_next = {}
-        for L_node, L_value in L.items():
-            if is_descendent(tree, mutation_node, L_node):
-                L_next[mutation_node] = L_value
+        for node in S:
+            value = L[node]
+            if is_descendent(tree, mutation_node, node):
+                L[node] = -1
+                L[mutation_node] = value
+                S_next.add(mutation_node)
                 # Traverse upwards until we reach old L node, adding values
                 # for the siblings off the path.
                 u = mutation_node
-                while u != L_node:
+                while u != node:
                     v = tree.parent(u)
                     for w in tree.children(v):
                         if w != u:
-                            L_next[w] = L_value
+                            L[w] = value
+                            S_next.add(w)
                     u = v
             else:
-                L_next[L_node] = L_value
+                S_next.add(node)
+        self.likelihood_nodes = S_next
         # Update the likelihoods for this site.
         max_L = -1
-        for v in L_next.keys():
-            x = L_next[v] * no_recomb_proba
+        for v in self.likelihood_nodes:
+            x = L[v] * no_recomb_proba
+            assert x >= 0
             y = recomb_proba
             if x > y:
                 z = x
@@ -298,15 +335,19 @@ class HaplotypeMatcher(object):
                 emission_p = int(is_descendent(tree, v, mutation_node))
             else:
                 emission_p = int(not is_descendent(tree, v, mutation_node))
-            L_next[v] = z * emission_p
-            if L_next[v] > max_L:
-                max_L = L_next[v]
+            L[v] = z * emission_p
+            if L[v] > max_L:
+                max_L = L[v]
         assert max_L > 0
 
         # Normalise
-        for v in L_next.keys():
-            L_next[v] /= max_L
-        self.likelihood = self.coalesce_equal(L_next)
+        for v in self.likelihood_nodes:
+            L[v] /= max_L
+        # print("BEFORE COAL")
+        # self.print_state(traceback=False)
+        self.coalesce_equal()
+        # print("AFTER COAL")
+        # self.print_state(traceback=False)
         self.choose_recombination_destination(site.index)
 
 
@@ -351,6 +392,7 @@ class HaplotypeMatcher(object):
         for tree, diff in zip(ts.trees(), ts.diffs()):
             self.tree = tree
             self.update_tree_state(diff)
+            self.check_state()
             # self.tree.draw("t{}.svg".format(self.tree.index),
             #         width=800, height=800, mutation_locations=False)
             # self.check_state()
@@ -404,8 +446,8 @@ def main():
     np.set_printoptions(threshold=20000)
     for j in range(1, 10000):
         print(j)
-        copy_process_dev(20, 200, j)
-    # copy_process_dev(10, 20, 4)
+        copy_process_dev(40, 20, j)
+    # copy_process_dev(100, 40, 4)
 
 
 if __name__ == "__main__":
