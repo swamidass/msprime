@@ -612,6 +612,27 @@ typedef struct {
     tree_sequence_t *tree_sequence;
 } ld_calc_t;
 
+typedef struct _node_list_t {
+    node_id_t *node;
+    struct _node_list_t *next;
+} node_list_t;
+
+typedef struct {
+    tree_sequence_t *tree_sequence;
+    double recombination_rate;
+    size_t num_sites;
+    size_t num_nodes;
+    node_id_t *samples;
+    size_t num_samples;
+    sparse_tree_t tree;
+    tree_diff_iterator_t diff_iterator;
+    node_id_t *parent;
+    avl_tree_t likelihood;
+    node_id_t *recombination_dest;
+    node_list_t **traceback;
+    object_heap_t avl_node_heap;
+} haplotype_matcher_t;
+
 typedef struct {
     double position;
     node_id_t node;
@@ -877,6 +898,13 @@ int ld_calc_get_r2(ld_calc_t *self, size_t a, size_t b, double *r2);
 int ld_calc_get_r2_array(ld_calc_t *self, size_t a, int direction,
         size_t max_mutations, double max_distance,
         double *r2, size_t *num_r2_values);
+
+int haplotype_matcher_alloc(haplotype_matcher_t *self,
+        tree_sequence_t *tree_sequence, double recombination_rate);
+int haplotype_matcher_free(haplotype_matcher_t *self);
+int haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
+        node_id_t *samples, size_t num_samples, node_id_t *path);
+void haplotype_matcher_print_state(haplotype_matcher_t *self, FILE *out);
 
 int hapgen_alloc(hapgen_t *self, tree_sequence_t *tree_sequence);
 int hapgen_get_haplotype(hapgen_t *self, node_id_t j, char **haplotype);

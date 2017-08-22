@@ -120,6 +120,7 @@ class HaplotypeMatcher(object):
                 # mapped to its children.
                 x = self.likelihood.pop(parent)
                 for c in children:
+                    assert c not in self.likelihood
                     self.likelihood[c] = x
             else:
                 # The children are now the roots of disconnected subtrees, and
@@ -136,7 +137,9 @@ class HaplotypeMatcher(object):
                 if u != -1:
                     x = self.likelihood[u]
                     for c in children:
+                        assert c not in self.likelihood
                         self.likelihood[c] = x
+
         # TODO we are not correctly coalescing all equal valued L values among
         # children here. Definitely need another pass at this algorithm to
         # make it more elegant and catch all the corner cases.
@@ -166,8 +169,10 @@ class HaplotypeMatcher(object):
                         v = self.parent[u]
                         for w in self.tree.children(v):
                             if w != u:
+                                assert w not in self.likelihood
                                 self.likelihood[w] = x
                         u = v
+
     def add_recombination_node(self, site_id, u):
         """
         Adds a recombination node for the specified site.

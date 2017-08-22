@@ -1084,6 +1084,69 @@ run_simplify(const char *input_filename, const char *output_filename, size_t num
     free(samples);
 }
 
+static void
+run_match(const char *filename, int verbose)
+{
+    tree_sequence_t ts;
+    char *genotypes = NULL;
+    char *haplotype = NULL;
+    node_id_t *samples = NULL;
+    size_t m, n;
+    vargen_t vg;
+    size_t j;
+    site_t *site;
+    node_id_t *path;
+    haplotype_matcher_t matcher;
+    int ret;
+
+    load_tree_sequence(&ts, filename);
+    m = tree_sequence_get_num_sites(&ts);
+    n = tree_sequence_get_sample_size(&ts);
+    haplotype = malloc(m * sizeof(char));
+    genotypes = malloc(n * sizeof(char));
+    samples = malloc(n * sizeof(node_id_t));
+    path = malloc(m * sizeof(node_id_t));
+    if (haplotype == NULL || genotypes == NULL || path == NULL || samples == NULL) {
+        fatal_error("No memory");
+    }
+    /* TODO fix this for general samples */
+    for (j = 0; j < n; j++) {
+        samples[j] = (node_id_t) j;
+    }
+    ret = vargen_alloc(&vg, &ts, MSP_GENOTYPES_AS_CHAR);
+    if (ret != 0) {
+        fatal_library_error(ret, "vargen_alloc");
+    }
+    /* Create a composite of all the samples. */
+    j = 0;
+    while ((ret = vargen_next(&vg, &site, genotypes)) == 1) {
+        haplotype[site->id] = genotypes[j];
+        j = (j + 1) % n;
+    }
+    printf("Matching: ");
+    for (j = 0; j < m; j++) {
+        printf("%c", haplotype[j]);
+    }
+    printf("\n");
+
+    ret = haplotype_matcher_alloc(&matcher, &ts, 1e-9);
+    if (ret != 0) {
+        fatal_library_error(ret, "haplotype_matcher_alloc");
+    }
+    ret = haplotype_matcher_run(&matcher, haplotype, samples, n, path);
+    if (ret != 0) {
+        fatal_library_error(ret, "haplotype_matcher_run");
+    }
+
+    free(haplotype);
+    free(genotypes);
+    free(samples);
+    free(path);
+    vargen_free(&vg);
+    haplotype_matcher_free(&matcher);
+    tree_sequence_free(&ts);
+}
+
 int
 main(int argc, char** argv)
 {
@@ -1173,6 +1236,14 @@ main(int argc, char** argv)
         infiles9, outfiles9, end9};
     int nerrors9;
 
+    /* SYNTAX 10: match [-v] <input-file> */
+    struct arg_rex *cmd10 = arg_rex1(NULL, NULL, "match", NULL, REG_ICASE, NULL);
+    struct arg_lit *verbose10 = arg_lit0("v", "verbose", NULL);
+    struct arg_file *infiles10 = arg_file1(NULL, NULL, NULL, NULL);
+    struct arg_end *end10 = arg_end(20);
+    void* argtable10[] = {cmd10, verbose10, infiles10, end10};
+    int nerrors10;
+
     int exitcode = EXIT_SUCCESS;
     const char *progname = "main";
 
@@ -1192,6 +1263,7 @@ main(int argc, char** argv)
     nerrors7 = arg_parse(argc, argv, argtable7);
     nerrors8 = arg_parse(argc, argv, argtable8);
     nerrors9 = arg_parse(argc, argv, argtable9);
+    nerrors10 = arg_parse(argc, argv, argtable10);
 
     if (nerrors1 == 0) {
         run_simulate(infiles1->filename[0], output1->filename[0], verbose1->count,
@@ -1214,6 +1286,8 @@ main(int argc, char** argv)
         run_simplify(infiles9->filename[0], outfiles9->filename[0],
                 (size_t) sample_size9->ival[0], (bool) filter_invariant_sites9->count,
                 verbose9->count);
+    } else if (nerrors10 == 0) {
+        run_match(infiles10->filename[0], verbose10->count);
     } else {
         /* We get here if the command line matched none of the possible syntaxes */
         if (cmd1->count > 0) {
@@ -1252,18 +1326,23 @@ main(int argc, char** argv)
             arg_print_errors(stdout, end9, progname);
             printf("usage: %s ", progname);
             arg_print_syntax(stdout, argtable9, "\n");
+        } else if (cmd10->count > 0) {
+            arg_print_errors(stdout, end10, progname);
+            printf("usage: %s ", progname);
+            arg_print_syntax(stdout, argtable10, "\n");
         } else {
             /* no correct cmd literals were given, so we cant presume which syntax was intended */
             printf("%s: missing command.\n",progname);
-            printf("usage 1: %s ", progname);  arg_print_syntax(stdout, argtable1, "\n");
-            printf("usage 2: %s ", progname);  arg_print_syntax(stdout, argtable2, "\n");
-            printf("usage 3: %s ", progname);  arg_print_syntax(stdout, argtable3, "\n");
-            printf("usage 4: %s ", progname);  arg_print_syntax(stdout, argtable4, "\n");
-            printf("usage 5: %s ", progname);  arg_print_syntax(stdout, argtable5, "\n");
-            printf("usage 6: %s ", progname);  arg_print_syntax(stdout, argtable6, "\n");
-            printf("usage 7: %s ", progname);  arg_print_syntax(stdout, argtable7, "\n");
-            printf("usage 8: %s ", progname);  arg_print_syntax(stdout, argtable8, "\n");
-            printf("usage 9: %s ", progname);  arg_print_syntax(stdout, argtable9, "\n");
+            printf("usage  1: %s ", progname);  arg_print_syntax(stdout, argtable1, "\n");
+            printf("usage  2: %s ", progname);  arg_print_syntax(stdout, argtable2, "\n");
+            printf("usage  3: %s ", progname);  arg_print_syntax(stdout, argtable3, "\n");
+            printf("usage  4: %s ", progname);  arg_print_syntax(stdout, argtable4, "\n");
+            printf("usage  5: %s ", progname);  arg_print_syntax(stdout, argtable5, "\n");
+            printf("usage  6: %s ", progname);  arg_print_syntax(stdout, argtable6, "\n");
+            printf("usage  7: %s ", progname);  arg_print_syntax(stdout, argtable7, "\n");
+            printf("usage  8: %s ", progname);  arg_print_syntax(stdout, argtable8, "\n");
+            printf("usage  9: %s ", progname);  arg_print_syntax(stdout, argtable9, "\n");
+            printf("usage 10: %s ", progname);  arg_print_syntax(stdout, argtable10, "\n");
         }
     }
 
@@ -1276,6 +1355,7 @@ main(int argc, char** argv)
     arg_freetable(argtable7, sizeof(argtable7) / sizeof(argtable7[0]));
     arg_freetable(argtable8, sizeof(argtable8) / sizeof(argtable8[0]));
     arg_freetable(argtable9, sizeof(argtable9) / sizeof(argtable9[0]));
+    arg_freetable(argtable10, sizeof(argtable10) / sizeof(argtable10[0]));
 
     return exitcode;
 }
