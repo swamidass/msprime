@@ -1,7 +1,6 @@
 """
 Implemenation of the Li and Stephens algorithm on a tree sequence.
 sequence.
-
 """
 import random
 import sys
@@ -96,6 +95,31 @@ class HaplotypeMatcher(object):
             samples |= leaves
         assert samples == set(self.tree_sequence.samples())
 
+    def check_partial_tree_consistency(self):
+        """
+        Given the partially udpated tree in the parent array, ensure that the
+        L values still have the correct properties.
+        """
+        P = self.parent
+        # Build the children array
+        C = [[] for _ in P]
+        for u, v in enumerate(P):
+            if v != -1:
+                C[v].append(u)
+        # for u in range(P.shape[0]):
+        #     if len(C[u]) > 0:
+        #         print(u, "->", C[u])
+        L = self.likelihood
+        for u in L.keys():
+            if u in C:
+                # traverse down from here. We should not meet any other
+                # L values.
+                stack = list(C[u])
+                while len(stack) > 0:
+                    v = stack.pop()
+                    stack.extend(C[v])
+                    assert v not in L
+
     def check_state(self):
         # print("AFTER IN:", L_tree)
         ts = self.tree_sequence
@@ -113,6 +137,7 @@ class HaplotypeMatcher(object):
         """
         _, records_out, records_in = diff
         for parent, children, _ in records_out:
+            # print("OUT:", parent, children)
             for c in children:
                 self.parent[c] = msprime.NULL_NODE
             if parent in self.likelihood:
@@ -139,6 +164,8 @@ class HaplotypeMatcher(object):
                     for c in children:
                         assert c not in self.likelihood
                         self.likelihood[c] = x
+
+        self.check_partial_tree_consistency()
 
         # TODO we are not correctly coalescing all equal valued L values among
         # children here. Definitely need another pass at this algorithm to
@@ -326,7 +353,7 @@ class HaplotypeMatcher(object):
             self.update_tree_state(diff)
             # self.tree.draw("t{}.svg".format(self.tree.index),
             #         width=800, height=800, mutation_locations=False)
-            self.check_state()
+            # self.check_state()
             # self.print_state()
             for site in tree.sites():
                 self.update_site(site, haplotype[site.index])
@@ -354,7 +381,7 @@ def copy_process_dev(n, L, seed):
 
     matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
     # print(H)
-    for j in range(10):
+    for j in range(1):
         h = random_mosaic(H)
         # h = np.hstack([H[0,:10], H[1,10:]])
         # print()
@@ -364,21 +391,21 @@ def copy_process_dev(n, L, seed):
 
         p = matcher.run(h)
 
-        print("p = ", p)
+        # print("p = ", p)
         hp = H[p, np.arange(m)]
-        print()
-        print(h)
-        print(hp)
+        # print()
+        # print(h)
+        # print(hp)
         assert np.array_equal(h, hp)
 
 
 def main():
     np.set_printoptions(linewidth=2000)
     np.set_printoptions(threshold=20000)
-    # for j in range(1, 10000):
-    #     print(j)
-    #     copy_process_dev(200, 20, j)
-    copy_process_dev(10, 10, 4)
+    for j in range(1, 10000):
+        print(j)
+        copy_process_dev(20, 200, j)
+    # copy_process_dev(10, 20, 4)
 
 
 if __name__ == "__main__":

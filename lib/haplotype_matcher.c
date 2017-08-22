@@ -260,9 +260,8 @@ haplotype_matcher_update_tree_state(haplotype_matcher_t *self,
     size_t num_L_children;
     list_len_t k;
 
-    printf("RECORDS OUT\n");
+    /* printf("RECORDS OUT\n"); */
     for (record = records_out; record != NULL; record = record->next) {
-        printf("\tparent %d\n", record->node);
         for (k = 0; k < record->num_children; k++) {
             self->parent[record->children[k]] = MSP_NULL_NODE;
         }
@@ -281,7 +280,6 @@ haplotype_matcher_update_tree_state(haplotype_matcher_t *self,
             }
             if (u != MSP_NULL_NODE) {
                 for (k = 0; k < record->num_children; k++) {
-                    printf("Setting L value for %d\n", record->children[k]);
                     ret = haplotype_matcher_insert_likelihood(self, record->children[k], x);
                     if (ret != 0) {
                         goto out;
@@ -292,10 +290,8 @@ haplotype_matcher_update_tree_state(haplotype_matcher_t *self,
             /* If we remove a node and it has an L value, then this L value is
              * mapped to its children. */
             haplotype_matcher_delete_likelihood(self, parent);
-            printf("Removing L value for %d\n", parent);
             for (k = 0; k < record->num_children; k++) {
                 ret = haplotype_matcher_insert_likelihood(self, record->children[k], x);
-                printf("adding L value for %d\n", record->children[k]);
                 if (ret != 0) {
                     goto out;
                 }
@@ -303,13 +299,12 @@ haplotype_matcher_update_tree_state(haplotype_matcher_t *self,
         }
     }
 
-    printf("AFTER OUT\n");
-    haplotype_matcher_print_state(self, stdout);
+    /* printf("AFTER OUT\n"); */
+    /* haplotype_matcher_print_state(self, stdout); */
 
-    printf("RECORDS IN\n");
+    /* printf("RECORDS IN\n"); */
     for (record = records_in; record != NULL; record = record->next) {
         parent = record->node;
-        printf("\tparent %d\n", record->node);
         for (k = 0; k < record->num_children; k++) {
             self->parent[record->children[k]] = parent;
         }
@@ -326,8 +321,6 @@ haplotype_matcher_update_tree_state(haplotype_matcher_t *self,
         }
         /* Again, taking shortcuts for binary tree sequences here. fix. */
         if (num_L_children == 2 && L_children[0] == L_children[1]) {
-            printf("Coalescing %d and %d into %d \n", record->children[0],
-                    record->children[1], parent);
             /* Coalesce the L values for the children into the parent */
             haplotype_matcher_delete_likelihood(self, record->children[0]);
             haplotype_matcher_delete_likelihood(self, record->children[1]);
@@ -344,18 +337,16 @@ haplotype_matcher_update_tree_state(haplotype_matcher_t *self,
                 u = self->parent[u];
             }
             if (u != MSP_NULL_NODE) {
-                printf("Resolving conflict: top = %d\n", u);
+                haplotype_matcher_delete_likelihood(self, u);
                 top = u;
                 u = parent;
                 /* Set the L value for the siblings of u as we traverse to top */
                 while (u != top) {
                     v = self->parent[u];
-                    printf("Setting value for sibs of %d\n", u);
                     for (k = 0; k < self->tree.num_children[v]; k++) {
                         w = self->tree.children[v][k];
                         if (w != u) {
                             ret = haplotype_matcher_insert_likelihood(self, w, x);
-                            printf("Set %d\n", w);
                             if (ret != 0) {
                                 goto out;
                             }
@@ -370,6 +361,19 @@ out:
     return ret;
 }
 
+static int WARN_UNUSED
+haplotype_matcher_upate_site_state(haplotype_matcher_t *self, site_t *site, char state)
+{
+    int ret = 0;
+    node_id_t mutation_node = site->mutations[0].node;
+
+    assert(site->mutations_length == 1);
+    assert(site->ancestral_state[0] == '0');
+    printf("Updating for site %d, node = %d\n", site->id, mutation_node);
+
+    return ret;
+}
+
 int WARN_UNUSED
 haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
         node_id_t *samples, size_t num_samples, node_id_t *path)
@@ -378,6 +382,8 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
     bool done = false;
     double length, left;
     node_record_t *records_out, *records_in;
+    site_t *sites;
+    list_len_t j, num_sites;
 
     ret = haplotype_matcher_reset(self, samples, num_samples);
     if (ret != 0) {
@@ -387,7 +393,7 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
     /* This is used as a sanity check that our tree and the diff iterator
      * are in sync */
     left = 0;
-    while (! done) {
+    while (!done) {
         /* haplotype_matcher_print_state(self, stdout); */
         assert(left == self->tree.left);
         ret = tree_diff_iterator_next(&self->diff_iterator, &length, &records_out,
@@ -398,10 +404,20 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
         if (ret != 0) {
             goto out;
         }
-
-        haplotype_matcher_print_state(self, stdout);
+        /* haplotype_matcher_print_state(self, stdout); */
         haplotype_matcher_check_state(self);
 
+        ret = sparse_tree_get_sites(&self->tree, &sites, &num_sites);
+        if (ret != 0) {
+            goto out;
+        }
+        for (j = 0; j < num_sites; j++) {
+            ret = haplotype_matcher_upate_site_state(self, &sites[j],
+                    haplotype[sites[j].id]);
+            if (ret != 0) {
+                goto out;
+            }
+        }
         ret = sparse_tree_next(&self->tree);
         if (ret < 0) {
             goto out;
