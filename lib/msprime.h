@@ -195,6 +195,16 @@ typedef struct {
 } object_heap_t;
 
 typedef struct {
+    size_t chunk_size;        /* number of bytes per chunk */
+    size_t top;               /* the offset of the next available byte in the current chunk */
+    size_t current_chunk;     /* the index of the chunk currently being used */
+    size_t total_size;        /* the total number of bytes allocated + overhead. */
+    size_t total_allocated;   /* the total number of bytes allocated. */
+    size_t num_chunks;        /* the number of memory chunks. */
+    char **mem_chunks;        /* the memory chunks */
+} block_allocator_t;
+
+typedef struct {
     population_id_t population_id;
     double time;
 } sample_t;
@@ -627,6 +637,7 @@ typedef struct {
     node_id_t *recombination_dest;
     node_list_t **traceback;
     object_heap_t avl_node_heap;
+    block_allocator_t node_list_allocator;
     node_id_t *node_buffer;
     double *likelihood_compression_buffer;
     /* stats counters */

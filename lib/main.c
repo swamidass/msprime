@@ -1123,7 +1123,7 @@ run_match(const char *filename, int verbose)
         haplotype[site->id] = genotypes[j];
         j = (j + 1) % n;
     }
-    if (verbose > 1) {
+    if (verbose > 0) {
         printf("Matching: ");
         for (j = 0; j < m; j++) {
             printf("%c", haplotype[j]);
@@ -1137,6 +1137,9 @@ run_match(const char *filename, int verbose)
     ret = haplotype_matcher_alloc(&matcher, &ts, 1e-9);
     if (ret != 0) {
         fatal_library_error(ret, "haplotype_matcher_alloc");
+    }
+    if (verbose > 0) {
+        haplotype_matcher_print_state(&matcher, stdout);
     }
     ret = haplotype_matcher_run(&matcher, haplotype, samples, n, path);
     if (ret != 0) {

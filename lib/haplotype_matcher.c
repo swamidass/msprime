@@ -23,6 +23,7 @@
 
 #include "err.h"
 #include "object_heap.h"
+#include "block_allocator.h"
 #include "msprime.h"
 
 #define NULL_LIKELIHOOD (-1)
@@ -86,8 +87,12 @@ haplotype_matcher_print_state(haplotype_matcher_t *self, FILE *out)
     fprintf(out, "tree = \n");
     fprintf(out, "\tindex = %d\n", (int) self->tree.index);
     object_heap_print_state(&self->avl_node_heap, out);
+    block_allocator_print_state(&self->node_list_allocator, out);
 
-    haplotype_matcher_check_state(self);
+    if (((int) self->tree.index) != -1) {
+        /* Check to make sure the tree has been initialised before checking state */
+        haplotype_matcher_check_state(self);
+    }
 }
 
 int WARN_UNUSED
@@ -96,6 +101,7 @@ haplotype_matcher_alloc(haplotype_matcher_t *self, tree_sequence_t *tree_sequenc
 {
     int ret = MSP_ERR_GENERIC;
     size_t avl_node_block_size = 8192; /* TODO make this a parameter? */
+    size_t node_list_block_size = 8192; /* TODO make this a parameter? */
 
     memset(self, 0, sizeof(haplotype_matcher_t));
     self->tree_sequence = tree_sequence;
@@ -122,6 +128,10 @@ haplotype_matcher_alloc(haplotype_matcher_t *self, tree_sequence_t *tree_sequenc
         goto out;
     }
     avl_init_tree(&self->likelihood_nodes, cmp_node_id, NULL);
+    ret = block_allocator_alloc(&self->node_list_allocator, node_list_block_size);
+    if (ret != 0) {
+        goto out;
+    }
     ret = sparse_tree_alloc(&self->tree, self->tree_sequence, 0);
     if (ret != 0) {
         goto out;
@@ -145,6 +155,7 @@ haplotype_matcher_free(haplotype_matcher_t *self)
     msp_safe_free(self->likelihood_compression_buffer);
     msp_safe_free(self->traceback);
     object_heap_free(&self->avl_node_heap);
+    block_allocator_free(&self->node_list_allocator);
     sparse_tree_free(&self->tree);
     tree_diff_iterator_free(&self->diff_iterator);
     return 0;
