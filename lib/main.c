@@ -1098,6 +1098,7 @@ run_match(const char *filename, int verbose)
     node_id_t *path;
     haplotype_matcher_t matcher;
     int ret;
+    bool check = true;
 
     load_tree_sequence(&ts, filename);
     m = tree_sequence_get_num_sites(&ts);
@@ -1123,6 +1124,7 @@ run_match(const char *filename, int verbose)
         haplotype[site->id] = genotypes[j];
         j = (j + 1) % n;
     }
+    vargen_free(&vg);
     if (verbose > 0) {
         printf("Matching: ");
         for (j = 0; j < m; j++) {
@@ -1138,21 +1140,40 @@ run_match(const char *filename, int verbose)
     if (ret != 0) {
         fatal_library_error(ret, "haplotype_matcher_alloc");
     }
-    if (verbose > 0) {
-        haplotype_matcher_print_state(&matcher, stdout);
-    }
     ret = haplotype_matcher_run(&matcher, haplotype, samples, n, path);
     if (ret != 0) {
         fatal_library_error(ret, "haplotype_matcher_run");
     }
+    ret = vargen_alloc(&vg, &ts, MSP_GENOTYPES_AS_CHAR);
+    if (ret != 0) {
+        fatal_library_error(ret, "vargen_alloc");
+    }
+    if (verbose > 0) {
+        printf("Path = ");
+        for (j = 0; j < m; j++) {
+            printf("%d ", path[j]);
+        }
+        printf("\n");
+    }
     printf("Mean likelihood nodes = %f\n",
             haplotype_matcher_get_mean_likelihood_nodes(&matcher));
-
+    printf("Mean traceback nodes  = %f\n",
+            haplotype_matcher_get_mean_traceback_nodes(&matcher));
+    if (verbose > 0) {
+        haplotype_matcher_print_state(&matcher, stdout);
+    }
+    if (check) {
+        while ((ret = vargen_next(&vg, &site, genotypes)) == 1) {
+            if (haplotype[site->id] != genotypes[path[site->id]]) {
+                fatal_error("Mismatch at site %d\n", site->id);
+            }
+        }
+        vargen_free(&vg);
+    }
     free(haplotype);
     free(genotypes);
     free(samples);
     free(path);
-    vargen_free(&vg);
     haplotype_matcher_free(&matcher);
     tree_sequence_free(&ts);
 }
