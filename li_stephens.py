@@ -298,15 +298,16 @@ class HaplotypeMatcher(object):
         L = self.likelihood
         S = self.likelihood_nodes
         tree = self.tree
-        S_next = set()
+        S_nodes = list(S)
         # Update L to add nodes for the mutation node, splitting and removing
         # existing L nodes as necessary.
-        for node in S:
+        for node in S_nodes:
             value = L[node]
             if is_descendent(tree, mutation_node, node):
                 L[node] = -1
+                S.remove(node)
                 L[mutation_node] = value
-                S_next.add(mutation_node)
+                S.add(mutation_node)
                 # Traverse upwards until we reach old L node, adding values
                 # for the siblings off the path.
                 u = mutation_node
@@ -315,11 +316,8 @@ class HaplotypeMatcher(object):
                     for w in tree.children(v):
                         if w != u:
                             L[w] = value
-                            S_next.add(w)
+                            S.add(w)
                     u = v
-            else:
-                S_next.add(node)
-        self.likelihood_nodes = S_next
         # Update the likelihoods for this site.
         max_L = -1
         for v in self.likelihood_nodes:
@@ -446,7 +444,7 @@ def main():
     np.set_printoptions(threshold=20000)
     for j in range(1, 10000):
         print(j)
-        copy_process_dev(40, 20, j)
+        copy_process_dev(10, 200, j)
     # copy_process_dev(100, 40, 4)
 
 

@@ -724,15 +724,15 @@ verify_simplify_properties(tree_sequence_t *ts, tree_sequence_t *subset,
                     ret = sparse_tree_get_mrca(&full_tree, samples[j], samples[k], &mrca1);
                     CU_ASSERT_EQUAL_FATAL(ret, 0);
                     CU_ASSERT_TRUE(
-                            sparse_tree_is_descendent(&full_tree, samples[j], mrca1));
+                            sparse_tree_is_descendant(&full_tree, samples[j], mrca1));
                     CU_ASSERT_TRUE(
-                            sparse_tree_is_descendent(&full_tree, samples[k], mrca1));
+                            sparse_tree_is_descendant(&full_tree, samples[k], mrca1));
                     ret = sparse_tree_get_time(&full_tree, mrca1, &tmrca1);
                     CU_ASSERT_EQUAL_FATAL(ret, 0);
                     ret = sparse_tree_get_mrca(&subset_tree, j, k, &mrca2);
                     CU_ASSERT_EQUAL_FATAL(ret, 0);
-                    CU_ASSERT_TRUE(sparse_tree_is_descendent(&subset_tree, j, mrca2));
-                    CU_ASSERT_TRUE(sparse_tree_is_descendent(&subset_tree, k, mrca2));
+                    CU_ASSERT_TRUE(sparse_tree_is_descendant(&subset_tree, j, mrca2));
+                    CU_ASSERT_TRUE(sparse_tree_is_descendant(&subset_tree, k, mrca2));
                     ret = sparse_tree_get_time(&subset_tree, mrca2, &tmrca2);
                     CU_ASSERT_EQUAL_FATAL(ret, 0);
                     CU_ASSERT_EQUAL(tmrca1, tmrca2);
@@ -3961,10 +3961,10 @@ test_single_tree_iter(void)
     ret = sparse_tree_get_mrca(&tree, 0, 2, &w);
     CU_ASSERT_EQUAL(ret, 0);
     CU_ASSERT_EQUAL(w, 6);
-    CU_ASSERT_TRUE(sparse_tree_is_descendent(&tree, 0, 4));
-    CU_ASSERT_FALSE(sparse_tree_is_descendent(&tree, 4, 0));
-    CU_ASSERT_FALSE(sparse_tree_is_descendent(&tree, 1, 0));
-    CU_ASSERT_TRUE(sparse_tree_is_descendent(&tree, 1, 1));
+    CU_ASSERT_TRUE(sparse_tree_is_descendant(&tree, 0, 4));
+    CU_ASSERT_FALSE(sparse_tree_is_descendant(&tree, 4, 0));
+    CU_ASSERT_FALSE(sparse_tree_is_descendant(&tree, 1, 0));
+    CU_ASSERT_TRUE(sparse_tree_is_descendant(&tree, 1, 1));
 
     ret = sparse_tree_next(&tree);
     CU_ASSERT_EQUAL(ret, 0);

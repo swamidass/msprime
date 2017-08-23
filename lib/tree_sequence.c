@@ -3106,14 +3106,14 @@ out:
     return ret;
 }
 
-/* Returns true if the node u is a descendent of v; i.e. if v is present on the
+/* Returns true if the node u is a descendant of v; i.e. if v is present on the
  * path from u to root. Returns false in all other situations, including
  * error conditions. */
 bool
-sparse_tree_is_descendent(sparse_tree_t *self, node_id_t u, node_id_t v)
+sparse_tree_is_descendant(sparse_tree_t *self, node_id_t u, node_id_t v)
 {
     int ret;
-    bool is_descendent = false;
+    bool is_descendant = false;
 
     ret = sparse_tree_check_node(self, u);
     if (ret != 0) {
@@ -3126,9 +3126,9 @@ sparse_tree_is_descendent(sparse_tree_t *self, node_id_t u, node_id_t v)
     while (u != MSP_NULL_NODE && u != v) {
         u = self->parent[u];
     }
-    is_descendent = u == v;
+    is_descendant = u == v;
 out:
-    return is_descendent;
+    return is_descendant;
 }
 
 int WARN_UNUSED

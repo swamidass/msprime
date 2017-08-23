@@ -627,6 +627,7 @@ typedef struct {
     node_id_t *recombination_dest;
     node_list_t **traceback;
     object_heap_t avl_node_heap;
+    node_id_t *node_buffer;
 } haplotype_matcher_t;
 
 typedef struct {
