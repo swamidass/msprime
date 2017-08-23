@@ -26,6 +26,7 @@
 #include "msprime.h"
 
 #define NULL_LIKELIHOOD (-1)
+#define INVALID_PATH (-2)
 
 static int
 cmp_node_id(const void *a, const void *b) {
@@ -99,13 +100,14 @@ haplotype_matcher_alloc(haplotype_matcher_t *self, tree_sequence_t *tree_sequenc
     self->num_sites = tree_sequence_get_num_sites(tree_sequence);
     self->num_nodes = tree_sequence_get_num_nodes(tree_sequence);
     self->likelihood = malloc(self->num_nodes * sizeof(double));
+    self->likelihood_compression_buffer = malloc(self->num_nodes * sizeof(double));
     self->node_buffer = malloc(self->num_nodes * sizeof(node_id_t));
     self->parent = malloc(self->num_nodes * sizeof(node_id_t));
     self->recombination_dest = malloc(self->num_sites * sizeof(site_id_t));
     self->traceback = malloc(self->num_sites * sizeof(node_list_t *));
     if (self->recombination_dest == NULL || self->parent == NULL
             || self->likelihood == NULL || self->traceback == NULL
-            || self->node_buffer == NULL) {
+            || self->node_buffer == NULL || self->likelihood_compression_buffer == NULL) {
         ret = MSP_ERR_NO_MEMORY;
         goto out;
     }
@@ -137,6 +139,7 @@ haplotype_matcher_free(haplotype_matcher_t *self)
     msp_safe_free(self->parent);
     msp_safe_free(self->likelihood);
     msp_safe_free(self->node_buffer);
+    msp_safe_free(self->likelihood_compression_buffer);
     msp_safe_free(self->traceback);
     object_heap_free(&self->avl_node_heap);
     sparse_tree_free(&self->tree);
@@ -187,8 +190,8 @@ haplotype_matcher_insert_likelihood(haplotype_matcher_t *self, node_id_t node,
         goto out;
     }
     avl_node = avl_insert_node(&self->likelihood_nodes, avl_node);
-    assert(avl_node != NULL);
     assert(self->likelihood[node] == NULL_LIKELIHOOD);
+    assert(avl_node != NULL);
     self->likelihood[node] = likelihood;
 out:
     return ret;
@@ -234,6 +237,7 @@ haplotype_matcher_reset(haplotype_matcher_t *self, node_id_t *samples,
     if (ret == 1) {
         ret = 0;
     }
+    self->total_likelihood_nodes = 0;
 out:
     return ret;
 }
@@ -312,9 +316,13 @@ haplotype_matcher_update_tree_state(haplotype_matcher_t *self,
             /* Coalesce the L values for the children into the parent */
             haplotype_matcher_delete_likelihood(self, record->children[0]);
             haplotype_matcher_delete_likelihood(self, record->children[1]);
-            ret = haplotype_matcher_insert_likelihood(self, parent, L_children[0]);
-            if (ret != 0) {
-                goto out;
+            if (self->likelihood[parent] == NULL_LIKELIHOOD) {
+                ret = haplotype_matcher_insert_likelihood(self, parent, L_children[0]);
+                if (ret != 0) {
+                    goto out;
+                }
+            } else {
+                assert(self->likelihood[parent] == L_children[0]);
             }
         }
         if (num_L_children > 0) {
@@ -452,6 +460,72 @@ haplotype_matcher_update_site_likelihood_values(haplotype_matcher_t *self,
 }
 
 static int WARN_UNUSED
+haplotype_matcher_coalesce_likelihoods(haplotype_matcher_t *self)
+{
+    int ret = 0;
+
+    double *V = self->likelihood_compression_buffer;
+    double *L = self->likelihood;
+    node_id_t *S = self->node_buffer;
+    size_t j, num_input_nodes;
+    avl_node_t *a, *tmp;
+    node_id_t u, last_u;
+    double x;
+
+    /* TODO get rid of this! */
+    for (j = 0; j < self->num_nodes; j++) {
+        V[j] = NULL_LIKELIHOOD;
+    }
+
+    a = self->likelihood_nodes.head;
+    num_input_nodes = 0;
+    while (a != NULL) {
+        tmp = a->next;
+        u = *((node_id_t *) a->item);
+        S[num_input_nodes] = u;
+        num_input_nodes++;
+        /* Delete the L value for u */
+        avl_unlink_node(&self->likelihood_nodes, a);
+        haplotype_matcher_free_avl_node(self, a);
+        x = L[u];
+        L[u] = NULL_LIKELIHOOD;
+        /* Propagate this L value up the tree */
+        while (u != MSP_NULL_NODE && V[u] == NULL_LIKELIHOOD) {
+            V[u] = x;
+            u = self->parent[u];
+        }
+        if (u != MSP_NULL_NODE && V[u] != x) {
+            /* Mark the path up to root as invalid */
+            while (u != MSP_NULL_NODE) {
+                V[u] = INVALID_PATH;
+                u = self->parent[u];
+            }
+        }
+        a = tmp;
+    }
+    assert(avl_count(&self->likelihood_nodes) == 0);
+
+    /* Get the distinct roots for input nodes in S in V */
+    for (j = 0; j < num_input_nodes; j++) {
+        u = S[j];
+        x = V[u];
+        last_u = u;
+        while (u != MSP_NULL_NODE && V[u] != INVALID_PATH) {
+            last_u = u;
+            u = self->parent[u];
+        }
+        if (x != INVALID_PATH && L[last_u] == NULL_LIKELIHOOD) {
+            ret = haplotype_matcher_insert_likelihood(self, last_u, x);
+            if (ret != 0) {
+                goto out;
+            }
+        }
+    }
+out:
+    return ret;
+}
+
+static int WARN_UNUSED
 haplotype_matcher_update_site_state(haplotype_matcher_t *self, site_t *site,
         char state, size_t num_samples)
 {
@@ -460,8 +534,8 @@ haplotype_matcher_update_site_state(haplotype_matcher_t *self, site_t *site,
 
     assert(site->mutations_length == 1);
     assert(site->ancestral_state[0] == '0');
-    printf("Updating for site %d, node = %d state = %c\n", site->id,
-            mutation_node, state);
+    /* printf("Updating for site %d, node = %d state = %c\n", site->id, */
+    /*         mutation_node, state); */
     ret = haplotype_matcher_update_site_likelihood_nodes(self, mutation_node);
     if (ret != 0) {
         goto out;
@@ -471,6 +545,12 @@ haplotype_matcher_update_site_state(haplotype_matcher_t *self, site_t *site,
     if (ret != 0) {
         goto out;
     }
+    ret = haplotype_matcher_coalesce_likelihoods(self);
+    if (ret != 0) {
+        goto out;
+    }
+    /* Update stats */
+    self->total_likelihood_nodes += avl_count(&self->likelihood_nodes);
 out:
     return ret;
 }
@@ -505,8 +585,7 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
         if (ret != 0) {
             goto out;
         }
-        printf("AFTER TREE UPDATE\n");
-        haplotype_matcher_print_state(self, stdout);
+        /* haplotype_matcher_print_state(self, stdout); */
         haplotype_matcher_check_state(self);
 
         ret = sparse_tree_get_sites(&self->tree, &sites, &num_sites);
@@ -519,7 +598,7 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
             if (ret != 0) {
                 goto out;
             }
-            haplotype_matcher_print_state(self, stdout);
+            /* haplotype_matcher_print_state(self, stdout); */
             haplotype_matcher_check_state(self);
         }
         ret = sparse_tree_next(&self->tree);
@@ -530,4 +609,10 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
     }
 out:
     return ret;
+}
+
+double
+haplotype_matcher_get_mean_likelihood_nodes(haplotype_matcher_t *self)
+{
+    return ((double) self->total_likelihood_nodes) / ((double) self->num_sites);
 }

@@ -196,8 +196,14 @@ class HaplotypeMatcher(object):
                 if self.likelihood[c] != -1:
                     L_children.append(self.likelihood[c])
             if len(L_children) == len(children) and len(set(L_children)) == 1:
-                self.likelihood[parent] = self.likelihood[children[0]]
-                self.likelihood_nodes.add(parent)
+                # TODO I don't understand how we can have a likelihood value
+                # for this parent already, but it does happen. Definitely need
+                # improve this algorithm.
+                if self.likelihood[parent] == -1:
+                    self.likelihood[parent] = self.likelihood[children[0]]
+                    self.likelihood_nodes.add(parent)
+                else:
+                    assert self.likelihood[parent] == self.likelihood[children[0]]
                 for c in children:
                     self.likelihood_nodes.remove(c)
                     self.likelihood[c] = -1
@@ -278,7 +284,7 @@ class HaplotypeMatcher(object):
             while u != msprime.NULL_NODE and V[u] != -2:
                 last_u = u
                 u = tree.parent(u)
-            if x != -2:
+            if x != -2 and self.likelihood[last_u] == -1:
                 self.likelihood[last_u] = x
                 self.likelihood_nodes.add(last_u)
 
@@ -430,9 +436,8 @@ def copy_process_dev(n, L, seed):
         # p = best_path_ts(h, ts, 1e-8)
 
         p = matcher.run(h)
-
-        # print("p = ", p)
         hp = H[p, np.arange(m)]
+        # print("p = ", p)
         # print()
         # print(h)
         # print(hp)
@@ -444,8 +449,8 @@ def main():
     np.set_printoptions(threshold=20000)
     for j in range(1, 10000):
         print(j)
-        copy_process_dev(10, 200, j)
-    # copy_process_dev(100, 40, 4)
+        copy_process_dev(10, 20, j)
+    # copy_process_dev(10, 40, 4)
 
 
 if __name__ == "__main__":

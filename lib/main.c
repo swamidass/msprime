@@ -1123,11 +1123,13 @@ run_match(const char *filename, int verbose)
         haplotype[site->id] = genotypes[j];
         j = (j + 1) % n;
     }
-    printf("Matching: ");
-    for (j = 0; j < m; j++) {
-        printf("%c", haplotype[j]);
+    if (verbose > 1) {
+        printf("Matching: ");
+        for (j = 0; j < m; j++) {
+            printf("%c", haplotype[j]);
+        }
+        printf("\n");
     }
-    printf("\n");
 
     ret = haplotype_matcher_alloc(&matcher, &ts, 1e-9);
     if (ret != 0) {
@@ -1137,6 +1139,10 @@ run_match(const char *filename, int verbose)
     if (ret != 0) {
         fatal_library_error(ret, "haplotype_matcher_run");
     }
+    printf("num samples = %d\n", (int) tree_sequence_get_sample_size(&ts));
+    printf("num sites = %d\n", (int) tree_sequence_get_num_sites(&ts));
+    printf("Mean likelihood nodes = %f\n",
+            haplotype_matcher_get_mean_likelihood_nodes(&matcher));
 
     free(haplotype);
     free(genotypes);
