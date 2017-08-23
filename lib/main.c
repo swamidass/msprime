@@ -1131,6 +1131,9 @@ run_match(const char *filename, int verbose)
         printf("\n");
     }
 
+    printf("Built haplotype\n");
+    printf("num samples = %d\n", (int) tree_sequence_get_sample_size(&ts));
+    printf("num sites = %d\n", (int) tree_sequence_get_num_sites(&ts));
     ret = haplotype_matcher_alloc(&matcher, &ts, 1e-9);
     if (ret != 0) {
         fatal_library_error(ret, "haplotype_matcher_alloc");
@@ -1139,8 +1142,6 @@ run_match(const char *filename, int verbose)
     if (ret != 0) {
         fatal_library_error(ret, "haplotype_matcher_run");
     }
-    printf("num samples = %d\n", (int) tree_sequence_get_sample_size(&ts));
-    printf("num sites = %d\n", (int) tree_sequence_get_num_sites(&ts));
     printf("Mean likelihood nodes = %f\n",
             haplotype_matcher_get_mean_likelihood_nodes(&matcher));
 

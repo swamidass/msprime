@@ -62,6 +62,8 @@ class HaplotypeMatcher(object):
         self.traceback = [[] for _ in range(self.num_sites)]
         # If we recombine during traceback, this is the node we recombine to.
         self.recombination_dest = np.zeros(self.num_sites, dtype=int) - 1
+        # This is the buffer used to propagate L values up the tree.
+        self.compression_buffer = np.zeros(self.num_nodes, dtype=int) - 1
 
     def reset(self):
         self.likelihood_nodes = set()
@@ -116,13 +118,12 @@ class HaplotypeMatcher(object):
         #     if len(C[u]) > 0:
         #         print(u, "->", C[u])
         for u in self.likelihood_nodes:
-            if u in C:
-                # traverse down from here. We should not meet any other L values.
-                stack = list(C[u])
-                while len(stack) > 0:
-                    v = stack.pop()
-                    stack.extend(C[v])
-                    assert v not in self.likelihood_nodes
+            # traverse down from here. We should not meet any other L values.
+            stack = list(C[u])
+            while len(stack) > 0:
+                v = stack.pop()
+                stack.extend(C[v])
+                assert v not in self.likelihood_nodes
 
     def check_state(self):
         # print("AFTER IN:", L_tree)
@@ -138,6 +139,7 @@ class HaplotypeMatcher(object):
             if self.likelihood[u] != -1:
                 assert u in self.likelihood_nodes
         # print("DONE")
+        assert np.all(self.compression_buffer == -1)
 
     def update_tree_state(self, diff):
         """
@@ -261,32 +263,38 @@ class HaplotypeMatcher(object):
         # O(n) operations, which is poor.
         tree = self.tree
         # Coalesce equal values
-        V = np.zeros(self.num_nodes, dtype=int) - 1
+        V = self.compression_buffer
+        S = set(self.likelihood_nodes)
         # Take all the L values an propagate them up the tree.
-        for u in self.likelihood_nodes:
+        for u in S:
             x = self.likelihood[u]
+            self.likelihood_nodes.remove(u)
+            self.likelihood[u] = -1
             while u != msprime.NULL_NODE and V[u] == -1:
                 V[u] = x
-                u = tree.parent(u)
+                u = self.parent[u]
             if u != msprime.NULL_NODE and V[u] != x:
                 # Mark the path up to root as invalid
                 while u!= msprime.NULL_NODE:
                     V[u] = -2
-                    u = tree.parent(u)
-        W = {}
-        # Get the distinct roots from L in V
-        S = set(self.likelihood_nodes)
-        self.likelihood[:] = -1
-        self.likelihood_nodes = set()
+                    u = self.parent[u]
+        assert len(self.likelihood_nodes) == 0
         for u in S:
             x = V[u]
             last_u = u
             while u != msprime.NULL_NODE and V[u] != -2:
                 last_u = u
-                u = tree.parent(u)
+                u = self.parent[u]
             if x != -2 and self.likelihood[last_u] == -1:
                 self.likelihood[last_u] = x
                 self.likelihood_nodes.add(last_u)
+        # Reset V
+        for u in S:
+            while u != msprime.NULL_NODE and V[u] != -1:
+                V[u] = -1
+                u = self.parent[u]
+
+
 
     def update_site(self, site, state):
         """
@@ -449,7 +457,7 @@ def main():
     np.set_printoptions(threshold=20000)
     for j in range(1, 10000):
         print(j)
-        copy_process_dev(10, 20, j)
+        copy_process_dev(100, 200, j)
     # copy_process_dev(10, 40, 4)
 
 

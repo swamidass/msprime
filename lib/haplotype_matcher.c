@@ -45,6 +45,7 @@ haplotype_matcher_check_state(haplotype_matcher_t *self)
     /* make sure the parent array we're maintaining is correct */
     for (j = 0; j < self->num_nodes; j++) {
         assert(self->parent[j] == self->tree.parent[j]);
+        assert(self->likelihood_compression_buffer[j] == -1);
     }
     /* Check the properties of the likelihood map */
     for (a = self->likelihood_nodes.head; a != NULL; a = a->next) {
@@ -85,6 +86,8 @@ haplotype_matcher_print_state(haplotype_matcher_t *self, FILE *out)
     fprintf(out, "tree = \n");
     fprintf(out, "\tindex = %d\n", (int) self->tree.index);
     object_heap_print_state(&self->avl_node_heap, out);
+
+    haplotype_matcher_check_state(self);
 }
 
 int WARN_UNUSED
@@ -223,6 +226,7 @@ haplotype_matcher_reset(haplotype_matcher_t *self, node_id_t *samples,
     memset(self->traceback, 0, self->num_sites * sizeof(node_list_t *));
     for (j = 0; j < self->num_nodes; j++) {
         self->likelihood[j] = NULL_LIKELIHOOD;
+        self->likelihood_compression_buffer[j] = NULL_LIKELIHOOD;
     }
     avl_clear_tree(&self->likelihood_nodes);
     /* Set the new samples */
@@ -472,11 +476,6 @@ haplotype_matcher_coalesce_likelihoods(haplotype_matcher_t *self)
     node_id_t u, last_u;
     double x;
 
-    /* TODO get rid of this! */
-    for (j = 0; j < self->num_nodes; j++) {
-        V[j] = NULL_LIKELIHOOD;
-    }
-
     a = self->likelihood_nodes.head;
     num_input_nodes = 0;
     while (a != NULL) {
@@ -519,6 +518,15 @@ haplotype_matcher_coalesce_likelihoods(haplotype_matcher_t *self)
             if (ret != 0) {
                 goto out;
             }
+        }
+    }
+
+    /* Reset V */
+    for (j = 0; j < num_input_nodes; j++) {
+        u = S[j];
+        while (u != MSP_NULL_NODE && V[u] != NULL_LIKELIHOOD) {
+            V[u] = NULL_LIKELIHOOD;
+            u = self->parent[u];
         }
     }
 out:
@@ -586,7 +594,7 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
             goto out;
         }
         /* haplotype_matcher_print_state(self, stdout); */
-        haplotype_matcher_check_state(self);
+        /* haplotype_matcher_check_state(self); */
 
         ret = sparse_tree_get_sites(&self->tree, &sites, &num_sites);
         if (ret != 0) {
@@ -599,7 +607,7 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
                 goto out;
             }
             /* haplotype_matcher_print_state(self, stdout); */
-            haplotype_matcher_check_state(self);
+            /* haplotype_matcher_check_state(self); */
         }
         ret = sparse_tree_next(&self->tree);
         if (ret < 0) {
