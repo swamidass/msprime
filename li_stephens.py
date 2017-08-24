@@ -6,7 +6,7 @@ import random
 import sys
 import time
 
-
+import six
 import numpy as np
 
 import msprime
@@ -99,10 +99,12 @@ class HaplotypeMatcher(object):
         """
         samples = set()
         for u in nodes:
-            # TODO should be samples not leaves.
-            leaves = set(self.tree.leaves(u))
-            assert len(leaves & samples) == 0
-            samples |= leaves
+            # TODO assuming here that all nodes are samples.
+            subtree_samples = set(self.tree.nodes(u))
+            assert len(subtree_samples & samples) == 0
+            samples |= subtree_samples
+        print("nodes = ", nodes)
+        print("samples = ", samples)
         assert samples == set(self.tree_sequence.samples())
 
     def check_partial_tree_consistency(self):
@@ -383,9 +385,8 @@ class HaplotypeMatcher(object):
         assert node.is_sample
         return u
 
-    def run_traceback(self):
+    def run_traceback(self, p):
         m = self.num_sites
-        p = np.zeros(m, dtype=int)
         p[m - 1] = self.map_sample(m - 1, self.recombination_dest[m - 1])
 
         for l in range(m - 1, 0, -1):
@@ -399,24 +400,28 @@ class HaplotypeMatcher(object):
             p[l - 1] = u
         return p
 
-    def run(self, haplotype):
+    def run(self, haplotype, path):
         self.reset()
         ts = self.tree_sequence
-        # self.print_state()
+        self.print_state()
         for tree, diff in zip(ts.trees(), ts.diffs()):
             self.tree = tree
             self.update_tree_state(diff)
+            self.print_state()
             self.check_state()
             # self.tree.draw("t{}.svg".format(self.tree.index),
             #         width=800, height=800, mutation_locations=False)
             # self.check_state()
-            # self.print_state()
             for site in tree.sites():
-                self.update_site(site, haplotype[site.index])
+                print("Update site", site)
+                if len(site.mutations) > 0:
+                    self.update_site(site, haplotype[site.index])
+                else:
+                    assert haplotype[site.index] == 0
+                self.print_state()
                 self.check_state()
-                # self.print_state()
         # self.print_state()
-        return self.run_traceback()
+        self.run_traceback(path)
 
 
 def random_mosaic(H):
@@ -463,6 +468,105 @@ def copy_process_dev(n, L, seed):
         assert np.array_equal(h, hp)
 
 
+def ancestral_sample_match_dev():
+    nodes = six.StringIO("""\
+    id      is_sample   population      time
+    0       1       -1              8.00000000000000
+    1       1       -1              7.00000000000000
+    2       1       -1              7.00000000000000
+    3       1       -1              5.00000000000000
+    4       1       -1              5.00000000000000
+    5       1       -1              5.00000000000000
+    6       1       -1              2.00000000000000
+    7       1       -1              2.00000000000000
+    """)
+    edgesets = six.StringIO("""\
+    id      left            right           parent  children
+    0       0.00000000      5.00000000      4       6,7
+    1       5.00000000      13.00000000     4       6
+    2       5.00000000      18.00000000     5       7
+    3       0.00000000      16.00000000     1       3,4,5
+    4       16.00000000     28.00000000     2       3,4,5
+    5       0.00000000      13.00000000     0       1,2
+    6       13.00000000     18.00000000     0       1,2,6
+    7       18.00000000     28.00000000     0       1,2,6,7
+    """)
+    sites = six.StringIO("""\
+    id      position        ancestral_state
+    0       0.00000000      0
+    1       1.00000000      0
+    2       2.00000000      0
+    3       3.00000000      0
+    4       4.00000000      0
+    5       5.00000000      0
+    6       6.00000000      0
+    7       7.00000000      0
+    8       8.00000000      0
+    9       9.00000000      0
+    10      10.00000000     0
+    11      11.00000000     0
+    12      12.00000000     0
+    13      13.00000000     0
+    14      14.00000000     0
+    15      15.00000000     0
+    16      16.00000000     0
+    17      17.00000000     0
+    18      18.00000000     0
+    19      19.00000000     0
+    20      20.00000000     0
+    21      21.00000000     0
+    22      22.00000000     0
+    23      23.00000000     0
+    24      24.00000000     0
+    25      25.00000000     0
+    26      26.00000000     0
+    27      27.00000000     0
+    """)
+    mutations = six.StringIO("""\
+    id      site    node    derived_state
+    0       3       4       1
+    1       4       7       1
+    2       5       7       1
+    3       6       5       1
+    4       7       5       1
+    5       8       6       1
+    6       9       5       1
+    7       11      1       1
+    8       13      1       1
+    9       16      2       1
+    10      18      2       1
+    11      20      2       1
+    12      21      3       1
+    13      26      2       1
+    """)
+    ts = msprime.load_text(
+            nodes=nodes, edgesets=edgesets, sites=sites, mutations=mutations)
+    print(ts.num_sites)
+    for t in ts.trees():
+        print(t)
+    n = ts.sample_size
+    m = ts.num_sites
+    print("n = {} m = {}".format(n, m))
+    H = np.zeros((n, m), dtype=np.int8)
+    for v in ts.variants():
+        H[:, v.index] = v.genotypes
+
+    print(H)
+
+    matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
+    # matcher = _msprime.HaplotypeMatcher(ts._ll_tree_sequence, recombination_rate=1e-8)
+    p = np.zeros(m, dtype=np.int32)
+
+    # h = random_mosaic(H) + ord('0')
+    h = random_mosaic(H)
+    print(h)
+    # h = np.hstack([H[0,:10], H[1,10:]])
+    # print()
+    # print(h)
+    # p = best_path(h, H, 1e-8)
+    # p = best_path_ts(h, ts, 1e-8)
+    matcher.run(h, p)
+
 def main():
     np.set_printoptions(linewidth=2000)
     np.set_printoptions(threshold=20000)
@@ -470,8 +574,9 @@ def main():
     #     print(j)
     #     copy_process_dev(100, 2000, j)
     # copy_process_dev(40, 40, 4)
-    for n in [10, 100, 1000, 10**4, 10**5]:
-        copy_process_dev(n, 10000, 4)
+    # for n in [10, 100, 1000, 10**4, 10**5]:
+    #     copy_process_dev(n, 10000, 4)
+    ancestral_sample_match_dev()
 
 
 
