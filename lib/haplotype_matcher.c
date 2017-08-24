@@ -79,6 +79,7 @@ haplotype_matcher_print_state(haplotype_matcher_t *self, FILE *out)
     node_id_t u;
     bool initialised = ((int) self->tree.index) != -1;
 
+    fprintf(out, "recombination_rate = %g\n", self->recombination_rate);
     fprintf(out, "tree_sequence = %p\n", (void *) self->tree_sequence);
     fprintf(out, "likelihood = (%d)\n", (int) avl_count(&self->likelihood_nodes));
     for (a = self->likelihood_nodes.head; a != NULL; a = a->next) {
@@ -278,7 +279,7 @@ haplotype_matcher_reset(haplotype_matcher_t *self, node_id_t *samples,
     }
     avl_clear_tree(&self->likelihood_nodes);
 
-    /* Set the new samples */
+    /* Set the samples */
     for (j = 0; j < num_samples; j++) {
         ret = haplotype_matcher_insert_likelihood(self, samples[j], 1.0);
         if (ret != 0) {
@@ -527,7 +528,10 @@ haplotype_matcher_update_site_likelihood_values(haplotype_matcher_t *self, site_
         if (L[u] > max_L) {
             max_L = L[u];
         }
+        /* printf("x = %f, y = %f, emission = %f\n", x, y, emission); */
+        /* printf("state = %d %d: likelihood = %f\n", state, '1', L[u]); */
     }
+    assert(max_L > 0);
     /* Normalise */
     for (a = self->likelihood_nodes.head; a != NULL; a = a->next) {
         u = *((node_id_t *) a->item);
@@ -751,8 +755,18 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
     node_record_t *records_out, *records_in;
     site_t *sites;
     list_len_t j, num_sites;
+    node_id_t *S;
 
-    ret = haplotype_matcher_reset(self, samples, num_samples);
+    /* If we provide an input of 0 samples this is interpreted as all samples. */
+    S = samples;
+    if (num_samples == 0) {
+        num_samples = tree_sequence_get_sample_size(self->tree_sequence);
+        ret = tree_sequence_get_samples(self->tree_sequence, &S);
+        if (ret != 0) {
+            goto out;
+        }
+    }
+    ret = haplotype_matcher_reset(self, S, num_samples);
     if (ret != 0) {
         goto out;
     }

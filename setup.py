@@ -157,7 +157,8 @@ configurator = PathConfigurator()
 source_files = [
     "msprime.c", "fenwick.c", "avl.c", "tree_sequence.c",
     "object_heap.c", "newick.c", "hapgen.c", "recomb_map.c", "mutgen.c",
-    "vargen.c", "vcf.c", "ld.c", "table.c"]
+    "vargen.c", "vcf.c", "ld.c", "table.c", "block_allocator.c",
+    "haplotype_matcher.c"]
 libdir = "lib"
 _msprime_module = Extension(
     '_msprime',

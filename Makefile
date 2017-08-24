@@ -2,6 +2,8 @@
 
 SRC=_msprimemodule.c
 
+default: ext3
+
 ext2: ${SRC}
 	python setup.py build_ext --inplace
 

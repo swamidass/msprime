@@ -4,11 +4,13 @@ sequence.
 """
 import random
 import sys
+import time
 
 
 import numpy as np
 
 import msprime
+import _msprime
 
 if sys.version_info[0] < 3:
     raise Exception("Python 3 you idiot!")
@@ -419,7 +421,7 @@ class HaplotypeMatcher(object):
 
 def random_mosaic(H):
     n, m = H.shape
-    h = np.zeros(m, dtype=int)
+    h = np.zeros(m, dtype=np.int8)
     for l in range(m):
         h[l] = H[random.randint(0, n - 1), l]
     return h
@@ -429,36 +431,48 @@ def copy_process_dev(n, L, seed):
     ts = msprime.simulate(
         n, length=L, mutation_rate=1, recombination_rate=1, random_seed=seed)
     m = ts.num_sites
-    H = np.zeros((n, m), dtype=int)
+    print("n = {} m = {}".format(n, m))
+
+    H = np.zeros((n, m), dtype=np.int8)
     for v in ts.variants():
         H[:, v.index] = v.genotypes
 
-    matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
+    # matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
+    matcher = _msprime.HaplotypeMatcher(ts._ll_tree_sequence, recombination_rate=1e-8)
+    p = np.zeros(m, dtype=np.int32)
+
     # print(H)
     for j in range(1):
-        h = random_mosaic(H)
+        h = random_mosaic(H) + ord('0')
+        # print(h)
         # h = np.hstack([H[0,:10], H[1,10:]])
         # print()
         # print(h)
         # p = best_path(h, H, 1e-8)
         # p = best_path_ts(h, ts, 1e-8)
+        before = time.clock()
+        matcher.run(h, p)
+        duration = time.clock() - before
+        print("Done in {} seconds".format(duration))
 
-        p = matcher.run(h)
-        hp = H[p, np.arange(m)]
+        hp = H[p, np.arange(m)] + ord('0')
         # print("p = ", p)
         # print()
-        # print(h)
-        # print(hp)
+        # print(h - ord('0'))
+        # print(hp - ord('0'))
         assert np.array_equal(h, hp)
 
 
 def main():
     np.set_printoptions(linewidth=2000)
     np.set_printoptions(threshold=20000)
-    for j in range(1, 10000):
-        print(j)
-        copy_process_dev(100, 200, j)
-    # copy_process_dev(10, 40, 4)
+    # for j in range(1, 10000):
+    #     print(j)
+    #     copy_process_dev(100, 2000, j)
+    # copy_process_dev(40, 40, 4)
+    for n in [10, 100, 1000, 10**4, 10**5]:
+        copy_process_dev(n, 10000, 4)
+
 
 
 if __name__ == "__main__":

@@ -160,6 +160,12 @@ typedef struct {
     ld_calc_t *ld_calc;
 } LdCalculator;
 
+typedef struct {
+    PyObject_HEAD
+    TreeSequence *tree_sequence;
+    haplotype_matcher_t *haplotype_matcher;
+} HaplotypeMatcher;
+
 static void
 handle_library_error(int err)
 {
@@ -5897,6 +5903,195 @@ static PyTypeObject LdCalculatorType = {
     (initproc)LdCalculator_init,      /* tp_init */
 };
 
+/*===================================================================
+ * HaplotypeMatcher
+ *===================================================================
+ */
+
+static int
+HaplotypeMatcher_check_state(HaplotypeMatcher *self)
+{
+    int ret = 0;
+    if (self->haplotype_matcher == NULL) {
+        PyErr_SetString(PyExc_SystemError, "matcher not initialised");
+        ret = -1;
+    }
+    return ret;
+}
+
+static void
+HaplotypeMatcher_dealloc(HaplotypeMatcher* self)
+{
+    if (self->haplotype_matcher != NULL) {
+        haplotype_matcher_free(self->haplotype_matcher);
+        PyMem_Free(self->haplotype_matcher);
+        self->haplotype_matcher = NULL;
+    }
+    Py_XDECREF(self->tree_sequence);
+    Py_TYPE(self)->tp_free((PyObject*)self);
+}
+
+static int
+HaplotypeMatcher_init(HaplotypeMatcher *self, PyObject *args, PyObject *kwds)
+{
+    int ret = -1;
+    int err;
+    static char *kwlist[] = {"tree_sequence", "recombination_rate", NULL};
+    TreeSequence *tree_sequence;
+    double recombination_rate;
+
+    self->haplotype_matcher = NULL;
+    self->tree_sequence = NULL;
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O!d", kwlist,
+            &TreeSequenceType, &tree_sequence, &recombination_rate)) {
+        goto out;
+    }
+    self->tree_sequence = tree_sequence;
+    Py_INCREF(self->tree_sequence);
+    if (TreeSequence_check_tree_sequence(self->tree_sequence) != 0) {
+        goto out;
+    }
+    self->haplotype_matcher = PyMem_Malloc(sizeof(haplotype_matcher_t));
+    if (self->haplotype_matcher == NULL) {
+        PyErr_NoMemory();
+        goto out;
+    }
+    err = haplotype_matcher_alloc(self->haplotype_matcher,
+            self->tree_sequence->tree_sequence, recombination_rate);
+    if (err != 0) {
+        handle_library_error(err);
+        goto out;
+    }
+    ret = 0;
+out:
+    return ret;
+}
+
+#ifdef HAVE_NUMPY
+static PyObject *
+HaplotypeMatcher_run(HaplotypeMatcher *self, PyObject *args)
+{
+    int err;
+    PyObject *ret = NULL;
+    PyObject *haplotype = NULL;
+    PyArrayObject *haplotype_array = NULL;
+    PyObject *path = NULL;
+    PyArrayObject *path_array = NULL;
+    size_t num_sites;
+    npy_intp *shape;
+
+    if (HaplotypeMatcher_check_state(self) != 0) {
+        goto out;
+    }
+    if (!PyArg_ParseTuple(args, "OO!", &haplotype, &PyArray_Type, &path)) {
+        goto out;
+    }
+    num_sites = tree_sequence_get_num_sites(self->tree_sequence->tree_sequence);
+    /* haplotype */
+    haplotype_array = (PyArrayObject *) PyArray_FROM_OTF(haplotype, NPY_INT8,
+            NPY_ARRAY_IN_ARRAY);
+    if (haplotype_array == NULL) {
+        goto out;
+    }
+    if (PyArray_NDIM(haplotype_array) != 1) {
+        PyErr_SetString(PyExc_ValueError, "Dim != 1");
+        goto out;
+    }
+    shape = PyArray_DIMS(haplotype_array);
+    if (shape[0] != num_sites) {
+        PyErr_SetString(PyExc_ValueError, "input haplotype wrong size");
+        goto out;
+    }
+    /* path */
+    path_array = (PyArrayObject *) PyArray_FROM_OTF(path, NPY_INT32,
+            NPY_ARRAY_INOUT_ARRAY);
+    if (path_array == NULL) {
+        goto out;
+    }
+    if (PyArray_NDIM(path_array) != 1) {
+        PyErr_SetString(PyExc_ValueError, "Dim != 1");
+        goto out;
+    }
+    shape = PyArray_DIMS(path_array);
+    if (shape[0] != num_sites) {
+        PyErr_SetString(PyExc_ValueError, "input path wrong size");
+        goto out;
+    }
+    Py_BEGIN_ALLOW_THREADS
+    err = haplotype_matcher_run(self->haplotype_matcher,
+        (char *) PyArray_DATA(haplotype_array),
+        NULL, 0,
+        (node_id_t *) PyArray_DATA(path_array));
+/*         haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype, */
+/*         node_id_t *samples, size_t num_samples, node_id_t *path) */
+    Py_END_ALLOW_THREADS
+    if (err != 0) {
+        handle_library_error(err);
+        goto out;
+    }
+    ret = Py_BuildValue("");
+out:
+    Py_XDECREF(haplotype_array);
+    /* TODO: we should probably be using PyArray_XDECREF_ERR here in error conditions.
+     * It's not clear whether this is a necessary step for error recovery, or if
+     * it just prevents potentially undefined data being copied back to an original
+     * array. */
+    Py_XDECREF(path_array);
+    return ret;
+}
+#endif
+
+static PyMemberDef HaplotypeMatcher_members[] = {
+    {NULL}  /* Sentinel */
+};
+
+static PyMethodDef HaplotypeMatcher_methods[] = {
+#ifdef HAVE_NUMPY
+    {"run", (PyCFunction) HaplotypeMatcher_run, METH_VARARGS,
+        "Run the matching process."},
+#endif
+    {NULL}  /* Sentinel */
+};
+
+static PyTypeObject HaplotypeMatcherType = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "_msprime.HaplotypeMatcher",             /* tp_name */
+    sizeof(HaplotypeMatcher),             /* tp_basicsize */
+    0,                         /* tp_itemsize */
+    (destructor)HaplotypeMatcher_dealloc, /* tp_dealloc */
+    0,                         /* tp_print */
+    0,                         /* tp_getattr */
+    0,                         /* tp_setattr */
+    0,                         /* tp_reserved */
+    0,                         /* tp_repr */
+    0,                         /* tp_as_number */
+    0,                         /* tp_as_sequence */
+    0,                         /* tp_as_mapping */
+    0,                         /* tp_hash  */
+    0,                         /* tp_call */
+    0,                         /* tp_str */
+    0,                         /* tp_getattro */
+    0,                         /* tp_setattro */
+    0,                         /* tp_as_buffer */
+    Py_TPFLAGS_DEFAULT,        /* tp_flags */
+    "HaplotypeMatcher objects",           /* tp_doc */
+    0,                     /* tp_traverse */
+    0,                     /* tp_clear */
+    0,                     /* tp_richcompare */
+    0,                     /* tp_weaklistoffset */
+    0,                     /* tp_iter */
+    0,                     /* tp_iternext */
+    HaplotypeMatcher_methods,             /* tp_methods */
+    HaplotypeMatcher_members,             /* tp_members */
+    0,                         /* tp_getset */
+    0,                         /* tp_base */
+    0,                         /* tp_dict */
+    0,                         /* tp_descr_get */
+    0,                         /* tp_descr_set */
+    0,                         /* tp_dictoffset */
+    (initproc)HaplotypeMatcher_init,      /* tp_init */
+};
+
 
 /*===================================================================
  * Simulator
@@ -8064,6 +8259,14 @@ init_msprime(void)
     }
     Py_INCREF(&LdCalculatorType);
     PyModule_AddObject(module, "LdCalculator", (PyObject *) &LdCalculatorType);
+
+    /* HaplotypeMatcher type */
+    HaplotypeMatcherType.tp_new = PyType_GenericNew;
+    if (PyType_Ready(&HaplotypeMatcherType) < 0) {
+        INITERROR;
+    }
+    Py_INCREF(&HaplotypeMatcherType);
+    PyModule_AddObject(module, "HaplotypeMatcher", (PyObject *) &HaplotypeMatcherType);
 
     /* Errors and constants */
     MsprimeInputError = PyErr_NewException("_msprime.InputError", NULL, NULL);
