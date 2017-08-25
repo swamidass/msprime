@@ -15,6 +15,58 @@ import _msprime
 if sys.version_info[0] < 3:
     raise Exception("Python 3 you idiot!")
 
+def best_path(h, H, recombination_rate):
+    n, m = H.shape
+    r = 1 - np.exp(-recombination_rate / n)
+    recomb_proba = r / n
+    no_recomb_proba = 1 - r + r / n
+
+    L = np.ones(n)
+    # This returns the full likelihoods to help develop the tree likelihood methods.
+    L_save = np.zeros((m, n))
+    T = [set() for _ in range(m)]
+    T_dest = np.zeros(m, dtype=int)
+
+    for l in range(m):
+        L_save[l] = L
+        L_next = np.zeros(n)
+        for j in range(n):
+            x = L[j] * no_recomb_proba
+            y = recomb_proba
+            if x > y:
+                z = x
+            else:
+                z = y
+                T[l].add(j)
+            if H[j, l] == h[l]:
+                emission_p = 1
+            else:
+                # Hack: to get a nonzero likelihood when we can't find a match
+                # stick in some tiny value.
+                emission_p = 1e-200
+            emission_p = int(H[j, l] == h[l])
+            L_next[j] = z * emission_p
+        # Find the max and renormalise
+        L = L_next
+        j = np.argmax(L)
+        T_dest[l] = j
+        L /= L[j]
+    P = np.zeros(m, dtype=int)
+    P[m - 1] = T_dest[m - 1]
+    mismatches = []
+    for l in range(m - 1, 0, -1):
+        j = P[l]
+        if H[j, l] != h[l]:
+            mismatches.append(l)
+        if j in T[l]:
+            assert l != 0
+            j = T_dest[l - 1]
+        P[l - 1] = j
+    if H[j, 0] != h[0]:
+        mismatches.append(0)
+    return P, mismatches, L_save
+
+
 def is_descendent(tree, u, v):
     """
     Returns True if the specified node u is a descendent of node v. That is,
@@ -67,11 +119,13 @@ class HaplotypeMatcher(object):
         # This is the buffer used to propagate L values up the tree.
         self.compression_buffer = np.zeros(self.num_nodes, dtype=int) - 1
 
-    def reset(self):
+    def reset(self, samples):
         self.likelihood_nodes = set()
         self.likelihood[:] = -1
         for u in self.samples:
             self.likelihood_nodes.add(u)
+            self.likelihood[u] = 0.0
+        for u in samples:
             self.likelihood[u] = 1.0
         self.parent[:] = -1
         self.traceback = [[] for _ in range(self.num_sites)]
@@ -95,12 +149,13 @@ class HaplotypeMatcher(object):
     def check_sample_coverage(self, nodes):
         """
         Ensures that all the samples from the specified tree are covered by the
-        set of nodes with no overlap.
+        set of nodes.
         """
         samples = set()
         for u in nodes:
             # TODO assuming here that all nodes are samples.
-            subtree_samples = set(self.tree.nodes(u))
+            # subtree_samples = set(self.tree.nodes(u))
+            subtree_samples = set(self.tree.leaves(u))
             assert len(subtree_samples & samples) == 0
             samples |= subtree_samples
         print("nodes = ", nodes)
@@ -400,17 +455,17 @@ class HaplotypeMatcher(object):
             p[l - 1] = u
         return p
 
-    def run(self, haplotype, path):
-        self.reset()
+    def run(self, samples, haplotype, path):
+        self.reset(samples)
         ts = self.tree_sequence
         self.print_state()
         for tree, diff in zip(ts.trees(), ts.diffs()):
             self.tree = tree
             self.update_tree_state(diff)
+            self.tree.draw("t{}.svg".format(self.tree.index),
+                    width=800, height=800, mutation_locations=False)
             self.print_state()
             self.check_state()
-            # self.tree.draw("t{}.svg".format(self.tree.index),
-            #         width=800, height=800, mutation_locations=False)
             # self.check_state()
             for site in tree.sites():
                 print("Update site", site)
@@ -442,30 +497,62 @@ def copy_process_dev(n, L, seed):
     for v in ts.variants():
         H[:, v.index] = v.genotypes
 
-    # matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
-    matcher = _msprime.HaplotypeMatcher(ts._ll_tree_sequence, recombination_rate=1e-8)
+    matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
+    # matcher = _msprime.HaplotypeMatcher(ts._ll_tree_sequence,
+    #         recombination_rate=1e-8, mutation_rate=1e-8)
     p = np.zeros(m, dtype=np.int32)
 
     # print(H)
-    for j in range(1):
-        h = random_mosaic(H) + ord('0')
+    for j in range(n):
+        # h = random_mosaic(H) + ord('0')
         # print(h)
         # h = np.hstack([H[0,:10], H[1,10:]])
         # print()
         # print(h)
-        # p = best_path(h, H, 1e-8)
+        h = H[j]
+        H_minus = np.vstack([H[:j], H[j + 1:]])
+        # print(H_minus)
+        p, mismatches, L = best_path(h, H_minus, 1e-8)
+        print("mismatches = ", mismatches)
         # p = best_path_ts(h, ts, 1e-8)
-        before = time.clock()
-        matcher.run(h, p)
-        duration = time.clock() - before
-        print("Done in {} seconds".format(duration))
+        # before = time.clock()
+        matcher.run([k for k in range(n) if k != j], h, p)
+        # duration = time.clock() - before
+        # print("Done in {} seconds".format(duration))
 
-        hp = H[p, np.arange(m)] + ord('0')
+        # hp = H[p, np.arange(m)] + ord('0')
+        print(p)
+        hp = H_minus[p, np.arange(m)]
+        for l in mismatches:
+            assert hp[l] != h[l]
+            hp[l] = h[l]
+        print(h)
+        print(hp)
         # print("p = ", p)
         # print()
         # print(h - ord('0'))
         # print(hp - ord('0'))
         assert np.array_equal(h, hp)
+
+
+def compress_likelihoods(tree, L):
+    N = L.shape[0]
+    samples = list(range(N))
+    print("samples = ", samples)
+    print("mapping", L, "to ", tree)
+
+    Q = np.zeros(N) - 1
+    # For each sample, progress up the tree until either we hit the root
+    # or an equal L value.
+    for u in samples:
+        x = L[u]
+        while L[u] == x and tree.parent(u) != msprime.NULL_NODE:
+            u = tree.parent(u)
+        Q[u] = x
+    print(Q)
+
+
+
 
 
 def ancestral_sample_match_dev():
@@ -550,22 +637,33 @@ def ancestral_sample_match_dev():
     H = np.zeros((n, m), dtype=np.int8)
     for v in ts.variants():
         H[:, v.index] = v.genotypes
-
     print(H)
 
-    matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
-    # matcher = _msprime.HaplotypeMatcher(ts._ll_tree_sequence, recombination_rate=1e-8)
-    p = np.zeros(m, dtype=np.int32)
+    # matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
+    # # matcher = _msprime.HaplotypeMatcher(ts._ll_tree_sequence, recombination_rate=1e-8)
+    # p = np.zeros(m, dtype=np.int32)
 
-    # h = random_mosaic(H) + ord('0')
+    # # h = random_mosaic(H) + ord('0')
     h = random_mosaic(H)
+    print()
     print(h)
-    # h = np.hstack([H[0,:10], H[1,10:]])
-    # print()
-    # print(h)
-    # p = best_path(h, H, 1e-8)
-    # p = best_path_ts(h, ts, 1e-8)
-    matcher.run(h, p)
+
+    # # h = np.hstack([H[0,:10], H[1,10:]])
+    # # print()
+    # # print(h)
+    p, L = best_path(h, H, 1e-8)
+    hp = H[p, np.arange(m)]
+    print(p)
+    print(h)
+    print(hp)
+    # # p = best_path_ts(h, ts, 1e-8)
+
+    for tree in ts.trees():
+        for site in tree.sites():
+            print("site", site.index, L[site.index])
+            compress_likelihoods(tree, L[site.index])
+
+    # matcher.run(h, p)
 
 def main():
     np.set_printoptions(linewidth=2000)
@@ -573,10 +671,10 @@ def main():
     # for j in range(1, 10000):
     #     print(j)
     #     copy_process_dev(100, 2000, j)
-    # copy_process_dev(40, 40, 4)
+    copy_process_dev(10, 4, 4)
     # for n in [10, 100, 1000, 10**4, 10**5]:
     #     copy_process_dev(n, 10000, 4)
-    ancestral_sample_match_dev()
+    # ancestral_sample_match_dev()
 
 
 

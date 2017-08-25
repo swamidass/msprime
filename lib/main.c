@@ -1099,6 +1099,8 @@ run_match(const char *filename, int verbose)
     haplotype_matcher_t matcher;
     int ret;
     bool check = true;
+    bool all_ones = true;
+    /* TODO add a useful API for generating target haplotypes here. */
 
     load_tree_sequence(&ts, filename);
     m = tree_sequence_get_num_sites(&ts);
@@ -1114,17 +1116,21 @@ run_match(const char *filename, int verbose)
     for (j = 0; j < n; j++) {
         samples[j] = (node_id_t) j;
     }
-    ret = vargen_alloc(&vg, &ts, MSP_GENOTYPES_AS_CHAR);
-    if (ret != 0) {
-        fatal_library_error(ret, "vargen_alloc");
+    if (all_ones) {
+        memset(haplotype, '1', m * sizeof(char));
+    } else {
+        ret = vargen_alloc(&vg, &ts, MSP_GENOTYPES_AS_CHAR);
+        if (ret != 0) {
+            fatal_library_error(ret, "vargen_alloc");
+        }
+        /* Create a composite of all the samples. */
+        j = 0;
+        while ((ret = vargen_next(&vg, &site, genotypes)) == 1) {
+            haplotype[site->id] = genotypes[j];
+            j = (j + 1) % n;
+        }
+        vargen_free(&vg);
     }
-    /* Create a composite of all the samples. */
-    j = 0;
-    while ((ret = vargen_next(&vg, &site, genotypes)) == 1) {
-        haplotype[site->id] = genotypes[j];
-        j = (j + 1) % n;
-    }
-    vargen_free(&vg);
     if (verbose > 0) {
         printf("Matching: ");
         for (j = 0; j < m; j++) {
@@ -1163,6 +1169,7 @@ run_match(const char *filename, int verbose)
         haplotype_matcher_print_state(&matcher, stdout);
     }
     if (check) {
+        ret = vargen_alloc(&vg, &ts, MSP_GENOTYPES_AS_CHAR);
         while ((ret = vargen_next(&vg, &site, genotypes)) == 1) {
             if (haplotype[site->id] != genotypes[path[site->id]]) {
                 fatal_error("Mismatch at site %d\n", site->id);
