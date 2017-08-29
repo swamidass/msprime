@@ -38,12 +38,12 @@ def best_path(h, H, recombination_rate):
             else:
                 z = y
                 T[l].add(j)
-            if H[j, l] == h[l]:
-                emission_p = 1
-            else:
-                # Hack: to get a nonzero likelihood when we can't find a match
-                # stick in some tiny value.
-                emission_p = 1e-200
+            # if H[j, l] == h[l]:
+            #     emission_p = 1
+            # else:
+            #     # Hack: to get a nonzero likelihood when we can't find a match
+            #     # stick in some tiny value.
+            #     emission_p = 1e-200
             emission_p = int(H[j, l] == h[l])
             L_next[j] = z * emission_p
         # Find the max and renormalise
@@ -65,6 +65,91 @@ def best_path(h, H, recombination_rate):
     if H[j, 0] != h[0]:
         mismatches.append(0)
     return P, mismatches, L_save
+
+
+def get_likelihood(u, L, tree):
+    """
+    Gets the likelihood of the specified node in the specified likelihood
+    encoding tree.
+    """
+    v = u
+    while v not in L:
+        v = tree.parent(v)
+    return L[v]
+
+
+def best_path_ts(h, ts, recombination_rate):
+    n, m = ts.sample_size, ts.num_sites
+    r = 1 - np.exp(-recombination_rate / n)
+    recomb_proba = r / n
+    no_recomb_proba = 1 - r + r / n
+
+    tree = next(ts.trees())
+    sites = list(ts.sites())
+    L = {tree.root: 1.0}
+    all_L = [None for _ in range(m)]
+
+    for l in range(m):
+        site = sites[l]
+        mutation_node = site.mutations[0].node
+        state = h[l]
+        # Insert an new L-value for the mutation node if needed.
+        if mutation_node not in L:
+            u = mutation_node
+            while u not in L:
+                u = tree.parent(u)
+            L[mutation_node] = L[u]
+        all_L[l] = dict(L)
+
+        # Update the likelihoods for this site.
+        max_L = -1
+        for v in L.keys():
+            x = L[v] * no_recomb_proba
+            assert x >= 0
+            y = recomb_proba
+            if x > y:
+                z = x
+            else:
+                z = y
+            if state == 1:
+                emission_p = int(is_descendent(tree, v, mutation_node))
+            else:
+                emission_p = int(not is_descendent(tree, v, mutation_node))
+            L[v] = z * emission_p
+            if L[v] > max_L:
+                max_L = L[v]
+        assert max_L > 0
+
+        # Normalise
+        for v in L.keys():
+            L[v] /= max_L
+        # Compress
+        # TODO we probably don't need the second dict here and can just take
+        # a copy of the keys.
+        L_next = {}
+        for u in L.keys():
+            if u != tree.root:
+                # Traverse upwards until we find another L value
+                v = tree.parent(u)
+                while v not in L:
+                    v = tree.parent(v)
+                if L[u] != L[v]:
+                    L_next[u] = L[u]
+            else:
+                L_next[u] = L[u]
+        L = L_next
+
+        # print("Site: ", l, "done:", L)
+    u = [k for k, v in L.items() if v == 1.0][0]
+    p = np.zeros(m, dtype=int)
+    p[m - 1] = u
+    for l in range(m - 1, 0, -1):
+        u = p[l]
+        x = get_likelihood(u, all_L[l], tree)
+        if x != 1.0:
+            u = [k for k, v in all_L[l].items() if v == 1.0][0]
+        p[l - 1] = u
+    return p
 
 
 def is_descendent(tree, u, v):
@@ -536,133 +621,159 @@ def copy_process_dev(n, L, seed):
 
 
 def compress_likelihoods(tree, L):
-    N = L.shape[0]
-    samples = list(range(N))
-    print("samples = ", samples)
-    print("mapping", L, "to ", tree)
+    # N = L.shape[0]
+    # samples = list(tree.samples())
+    # print("Input = ")
+    # for u in tree.samples():
+    #     print("\t", u, "->", L[u])
+    # print("samples = ", samples)
+    # print("mapping", L, "to ", tree)
+    Q = {}
+    # for each sample, traverse upwards to the root.
+    for u in tree.nodes(order="postorder"):
+        Q[u] = L[u]
+        for v in tree.children(u):
+            if Q[v] == Q[u]:
+                del Q[v]
+    # print("Output")
+    # for u in tree.samples():
+    #     if u in Q:
+    #         print("\t", u, "->", Q[u])
+    return Q
 
-    Q = np.zeros(N) - 1
-    # For each sample, progress up the tree until either we hit the root
-    # or an equal L value.
-    for u in samples:
-        x = L[u]
-        while L[u] == x and tree.parent(u) != msprime.NULL_NODE:
-            u = tree.parent(u)
-        Q[u] = x
-    print(Q)
 
+def ancestral_sample_match_dev(n, seed):
 
+    # nodes = six.StringIO("""\
+    # id      is_sample   population      time
+    # 0       1       -1              8.00000000000000
+    # 1       1       -1              7.00000000000000
+    # 2       1       -1              7.00000000000000
+    # 3       1       -1              5.00000000000000
+    # 4       1       -1              5.00000000000000
+    # 5       1       -1              5.00000000000000
+    # 6       1       -1              2.00000000000000
+    # 7       1       -1              2.00000000000000
+    # """)
+    # edgesets = six.StringIO("""\
+    # id      left            right           parent  children
+    # 0       0.00000000      5.00000000      4       6,7
+    # 1       5.00000000      13.00000000     4       6
+    # 2       5.00000000      18.00000000     5       7
+    # 3       0.00000000      16.00000000     1       3,4,5
+    # 4       16.00000000     28.00000000     2       3,4,5
+    # 5       0.00000000      13.00000000     0       1,2
+    # 6       13.00000000     18.00000000     0       1,2,6
+    # 7       18.00000000     28.00000000     0       1,2,6,7
+    # """)
+    # sites = six.StringIO("""\
+    # id      position        ancestral_state
+    # 0       0.00000000      0
+    # 1       1.00000000      0
+    # 2       2.00000000      0
+    # 3       3.00000000      0
+    # 4       4.00000000      0
+    # 5       5.00000000      0
+    # 6       6.00000000      0
+    # 7       7.00000000      0
+    # 8       8.00000000      0
+    # 9       9.00000000      0
+    # 10      10.00000000     0
+    # 11      11.00000000     0
+    # 12      12.00000000     0
+    # 13      13.00000000     0
+    # 14      14.00000000     0
+    # 15      15.00000000     0
+    # 16      16.00000000     0
+    # 17      17.00000000     0
+    # 18      18.00000000     0
+    # 19      19.00000000     0
+    # 20      20.00000000     0
+    # 21      21.00000000     0
+    # 22      22.00000000     0
+    # 23      23.00000000     0
+    # 24      24.00000000     0
+    # 25      25.00000000     0
+    # 26      26.00000000     0
+    # 27      27.00000000     0
+    # """)
+    # mutations = six.StringIO("""\
+    # id      site    node    derived_state
+    # 0       3       4       1
+    # 1       4       7       1
+    # 2       5       7       1
+    # 3       6       5       1
+    # 4       7       5       1
+    # 5       8       6       1
+    # 6       9       5       1
+    # 7       11      1       1
+    # 8       13      1       1
+    # 9       16      2       1
+    # 10      18      2       1
+    # 11      20      2       1
+    # 12      21      3       1
+    # 13      26      2       1
+    # """)
+    # ts = msprime.load_text(
+    #         nodes=nodes, edgesets=edgesets, sites=sites, mutations=mutations)
+    # print(ts.num_sites)
 
-
-
-def ancestral_sample_match_dev():
-    nodes = six.StringIO("""\
-    id      is_sample   population      time
-    0       1       -1              8.00000000000000
-    1       1       -1              7.00000000000000
-    2       1       -1              7.00000000000000
-    3       1       -1              5.00000000000000
-    4       1       -1              5.00000000000000
-    5       1       -1              5.00000000000000
-    6       1       -1              2.00000000000000
-    7       1       -1              2.00000000000000
-    """)
-    edgesets = six.StringIO("""\
-    id      left            right           parent  children
-    0       0.00000000      5.00000000      4       6,7
-    1       5.00000000      13.00000000     4       6
-    2       5.00000000      18.00000000     5       7
-    3       0.00000000      16.00000000     1       3,4,5
-    4       16.00000000     28.00000000     2       3,4,5
-    5       0.00000000      13.00000000     0       1,2
-    6       13.00000000     18.00000000     0       1,2,6
-    7       18.00000000     28.00000000     0       1,2,6,7
-    """)
-    sites = six.StringIO("""\
-    id      position        ancestral_state
-    0       0.00000000      0
-    1       1.00000000      0
-    2       2.00000000      0
-    3       3.00000000      0
-    4       4.00000000      0
-    5       5.00000000      0
-    6       6.00000000      0
-    7       7.00000000      0
-    8       8.00000000      0
-    9       9.00000000      0
-    10      10.00000000     0
-    11      11.00000000     0
-    12      12.00000000     0
-    13      13.00000000     0
-    14      14.00000000     0
-    15      15.00000000     0
-    16      16.00000000     0
-    17      17.00000000     0
-    18      18.00000000     0
-    19      19.00000000     0
-    20      20.00000000     0
-    21      21.00000000     0
-    22      22.00000000     0
-    23      23.00000000     0
-    24      24.00000000     0
-    25      25.00000000     0
-    26      26.00000000     0
-    27      27.00000000     0
-    """)
-    mutations = six.StringIO("""\
-    id      site    node    derived_state
-    0       3       4       1
-    1       4       7       1
-    2       5       7       1
-    3       6       5       1
-    4       7       5       1
-    5       8       6       1
-    6       9       5       1
-    7       11      1       1
-    8       13      1       1
-    9       16      2       1
-    10      18      2       1
-    11      20      2       1
-    12      21      3       1
-    13      26      2       1
-    """)
-    ts = msprime.load_text(
-            nodes=nodes, edgesets=edgesets, sites=sites, mutations=mutations)
-    print(ts.num_sites)
-    for t in ts.trees():
-        print(t)
+    ts = msprime.simulate(n, mutation_rate=50, random_seed=seed)
+    tables = ts.dump_tables()
+    nodes = tables.nodes
+    flags = nodes.flags
+    # Set all nodes to be samples.
+    flags[:] = msprime.NODE_IS_SAMPLE
+    nodes.set_columns(flags=flags, time=nodes.time, population=nodes.population)
+    ts = msprime.load_tables(
+        nodes=nodes, edgesets=tables.edgesets,
+        sites=tables.sites, mutations=tables.mutations)
+    # for t in ts.trees():
+    #     print(t)
+    #     t.draw("t{}.svg".format(t.index),
+    #             width=800, height=800, mutation_locations=False)
     n = ts.sample_size
     m = ts.num_sites
     print("n = {} m = {}".format(n, m))
     H = np.zeros((n, m), dtype=np.int8)
     for v in ts.variants():
         H[:, v.index] = v.genotypes
-    print(H)
+    # print(H)
 
     # matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
     # # matcher = _msprime.HaplotypeMatcher(ts._ll_tree_sequence, recombination_rate=1e-8)
     # p = np.zeros(m, dtype=np.int32)
 
     # # h = random_mosaic(H) + ord('0')
+    random.seed(1)
     h = random_mosaic(H)
-    print()
-    print(h)
+    # print()
+    # print("h = ", h)
 
     # # h = np.hstack([H[0,:10], H[1,10:]])
     # # print()
     # # print(h)
-    p, L = best_path(h, H, 1e-8)
+    p, mismatches, L = best_path(h, H, 1e-8)
     hp = H[p, np.arange(m)]
-    print(p)
-    print(h)
-    print(hp)
-    # # p = best_path_ts(h, ts, 1e-8)
+    # print(p)
+    # print(h)
+    # print(hp)
+    assert np.array_equal(h, hp)
+    p = best_path_ts(h, ts, 1e-8)
 
-    for tree in ts.trees():
-        for site in tree.sites():
-            print("site", site.index, L[site.index])
-            compress_likelihoods(tree, L[site.index])
+    hp = H[p, np.arange(m)]
+    # print(p)
+    # print(h)
+    # print(hp)
+    assert np.array_equal(h, hp)
 
+
+    # for tree in ts.trees():
+    #     for site in tree.sites():
+    #         print("site", site.index, ": u = ", site.mutations[0].node,
+    #                 "state = ", h[site.index],
+    #                 compress_likelihoods(tree, L[site.index]))
+    #         compress_likelihoods(tree, L[site.index])
     # matcher.run(h, p)
 
 def main():
@@ -671,10 +782,12 @@ def main():
     # for j in range(1, 10000):
     #     print(j)
     #     copy_process_dev(100, 2000, j)
-    copy_process_dev(10, 4, 4)
+    # copy_process_dev(10, 4, 4)
     # for n in [10, 100, 1000, 10**4, 10**5]:
     #     copy_process_dev(n, 10000, 4)
-    # ancestral_sample_match_dev()
+    for seed in range(1, 10000):
+        print(seed)
+        ancestral_sample_match_dev(500, seed)
 
 
 
