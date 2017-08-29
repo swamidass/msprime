@@ -4874,9 +4874,9 @@ test_sparse_tree_errors(void)
         CU_ASSERT_EQUAL(ret, MSP_ERR_OUT_OF_BOUNDS);
         ret = sparse_tree_get_num_samples(&t, u, NULL);
         CU_ASSERT_EQUAL(ret, MSP_ERR_OUT_OF_BOUNDS);
-        CU_ASSERT_FALSE(sparse_tree_is_descendent(&t, 0, u));
-        CU_ASSERT_FALSE(sparse_tree_is_descendent(&t, u, 0));
-        CU_ASSERT_FALSE(sparse_tree_is_descendent(&t, u, u));
+        CU_ASSERT_FALSE(sparse_tree_is_descendant(&t, 0, u));
+        CU_ASSERT_FALSE(sparse_tree_is_descendant(&t, u, 0));
+        CU_ASSERT_FALSE(sparse_tree_is_descendant(&t, u, u));
         ret = sparse_tree_get_num_tracked_samples(&t, u, NULL);
         CU_ASSERT_EQUAL(ret, MSP_ERR_OUT_OF_BOUNDS);
         ret = sparse_tree_get_sample_list(&t, u, NULL, NULL);

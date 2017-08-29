@@ -882,7 +882,7 @@ int sparse_tree_get_num_tracked_samples(sparse_tree_t *self, node_id_t u,
         size_t *num_tracked_samples);
 int sparse_tree_get_sample_list(sparse_tree_t *self, node_id_t u,
         node_list_t **head, node_list_t **tail);
-bool sparse_tree_is_descendent(sparse_tree_t *self, node_id_t u, node_id_t v);
+bool sparse_tree_is_descendant(sparse_tree_t *self, node_id_t u, node_id_t v);
 int sparse_tree_get_sites(sparse_tree_t *self, site_t **sites, list_len_t *sites_length);
 void sparse_tree_print_state(sparse_tree_t *self, FILE *out);
 /* Method for positioning the tree in the sequence. */
