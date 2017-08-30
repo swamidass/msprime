@@ -5951,6 +5951,12 @@ HaplotypeMatcher_init(HaplotypeMatcher *self, PyObject *args, PyObject *kwds)
     if (TreeSequence_check_tree_sequence(self->tree_sequence) != 0) {
         goto out;
     }
+    /* For now we only support all-sample tree sequences */
+    if (tree_sequence_get_num_nodes(tree_sequence->tree_sequence) !=
+            tree_sequence_get_sample_size(tree_sequence->tree_sequence)) {
+        PyErr_SetString(PyExc_ValueError, "Only all-sample tree sequences supported");
+        goto out;
+    }
     self->haplotype_matcher = PyMem_Malloc(sizeof(haplotype_matcher_t));
     if (self->haplotype_matcher == NULL) {
         PyErr_NoMemory();

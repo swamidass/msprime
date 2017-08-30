@@ -2459,17 +2459,24 @@ tree_diff_iterator_alloc(tree_diff_iterator_t *self,
     self->num_nodes = tree_sequence_get_num_nodes(tree_sequence);
     self->num_records = tree_sequence_get_num_edgesets(tree_sequence);
     self->tree_sequence = tree_sequence;
-    self->insertion_index = 0;
-    self->removal_index = 0;
-    self->tree_left = 0;
-    self->tree_index = (size_t) -1;
     self->node_records = malloc(self->num_nodes * sizeof(node_record_t));
     if (self->node_records == NULL) {
         ret = MSP_ERR_NO_MEMORY;
         goto out;
     }
+    tree_diff_iterator_reset(self);
 out:
     return ret;
+}
+
+int
+tree_diff_iterator_reset(tree_diff_iterator_t *self)
+{
+    self->insertion_index = 0;
+    self->removal_index = 0;
+    self->tree_left = 0;
+    self->tree_index = (size_t) -1;
+    return 0;
 }
 
 int WARN_UNUSED

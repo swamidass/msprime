@@ -762,100 +762,8 @@ def compress_likelihoods(tree, L):
 
 def ancestral_sample_match_dev(n, seed):
 
-#     nodes = six.StringIO("""\
-#     id      is_sample   population      time
-#     0       1       -1              8.00000000000000
-#     1       1       -1              7.00000000000000
-#     2       1       -1              7.00000000000000
-#     3       1       -1              5.00000000000000
-#     4       1       -1              5.00000000000000
-#     5       1       -1              5.00000000000000
-#     6       1       -1              2.00000000000000
-#     7       1       -1              2.00000000000000
-#     """)
-#     edgesets = six.StringIO("""\
-#     id      left            right           parent  children
-#     0       0.00000000      5.00000000      4       6,7
-#     1       5.00000000      13.00000000     4       6
-#     2       5.00000000      18.00000000     5       7
-#     3       0.00000000      16.00000000     1       3,4,5
-#     4       16.00000000     28.00000000     2       3,4,5
-#     5       0.00000000      13.00000000     0       1,2
-#     6       13.00000000     18.00000000     0       1,2,6
-#     7       18.00000000     28.00000000     0       1,2,6,7
-#     """)
-#     sites = six.StringIO("""\
-#     id      position        ancestral_state
-#     0       0.00000000      0
-#     1       1.00000000      0
-#     2       2.00000000      0
-#     3       3.00000000      0
-#     4       4.00000000      0
-#     5       5.00000000      0
-#     6       6.00000000      0
-#     7       7.00000000      0
-#     8       8.00000000      0
-#     9       9.00000000      0
-#     10      10.00000000     0
-#     11      11.00000000     0
-#     12      12.00000000     0
-#     13      13.00000000     0
-#     14      14.00000000     0
-#     15      15.00000000     0
-#     16      16.00000000     0
-#     17      17.00000000     0
-#     18      18.00000000     0
-#     19      19.00000000     0
-#     20      20.00000000     0
-#     21      21.00000000     0
-#     22      22.00000000     0
-#     23      23.00000000     0
-#     24      24.00000000     0
-#     25      25.00000000     0
-#     26      26.00000000     0
-#     27      27.00000000     0
-#     """)
-#     mutations = six.StringIO("""\
-#     id      site    node    derived_state
-#     0       3       4       1
-#     1       4       7       1
-#     2       5       7       1
-#     3       6       5       1
-#     4       7       5       1
-#     5       8       6       1
-#     6       9       5       1
-#     7       11      1       1
-#     8       13      1       1
-#     9       16      2       1
-#     10      18      2       1
-#     11      20      2       1
-#     12      21      3       1
-#     13      26      2       1
-#     """)
-#     ts = msprime.load_text(
-#             nodes=nodes, edgesets=edgesets, sites=sites, mutations=mutations)
-
     ts = msprime.load("ancestors_example-2.hdf5")
-    # print(ts.num_sites)
-
-    # ts = wf_sim(n,  10 * n, survival=0.25, mutation_rate=1)
-
-    # print(ts)
-
-    # for x in ts.dump_tables():
-    #     print(x)
-
-    # ts = msprime.simulate(n, mutation_rate=50, random_seed=seed)
-    # tables = ts.dump_tables()
-    # nodes = tables.nodes
-    # flags = nodes.flags
-    # # Set all nodes to be samples.
-    # flags[:] = msprime.NODE_IS_SAMPLE
-    # nodes.set_columns(flags=flags, time=nodes.time, population=nodes.population)
-    # ts = msprime.load_tables(
-    #     nodes=nodes, edgesets=tables.edgesets,
-    #     sites=tables.sites, mutations=tables.mutations)
-
+    # ts = msprime.load("ancestors_example.hdf5")
     # for t in ts.trees():
     #     t.draw("t{}.svg".format(t.index),
     #             width=800, height=800, mutation_locations=False)
@@ -869,35 +777,53 @@ def ancestral_sample_match_dev(n, seed):
     # print(H)
 
     # matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
-    # # matcher = _msprime.HaplotypeMatcher(ts._ll_tree_sequence, recombination_rate=1e-8)
-    # p = np.zeros(m, dtype=np.int32)
 
     # # h = random_mosaic(H) + ord('0')
+    matcher = _msprime.HaplotypeMatcher(ts._ll_tree_sequence, recombination_rate=1e-8)
     for j in range(10000):
-        print(j)
+        # print(j)
         random.seed(j)
         h = random_mosaic(H)
         # print()
         # print("h = ", h)
 
-        # # h = np.hstack([H[0,:10], H[1,10:]])
-        # # print()
+        # print("".join(str(x) for x in h))
+        # print()
+
+
+        # # # h = np.hstack([H[0,:10], H[1,10:]])
+        # # # print()
+        # # # print(h)
+        # p, mismatches, L = best_path(h, H, 1e-8)
+        # hp = H[p, np.arange(m)]
+        # # print(p)
         # # print(h)
-        p, mismatches, L = best_path(h, H, 1e-8)
-        hp = H[p, np.arange(m)]
-        # print(p)
-        # print(h)
-        # print(hp)
-        assert np.array_equal(h, hp)
-        p = best_path_ts(h, ts, 1e-8)
+        # # print(hp)
+        # assert np.array_equal(h, hp)
+        # p = best_path_ts(h, ts, 1e-8)
+
+        # hp = H[p, np.arange(m)]
+        # # print(p)
+        # # print(h)
+        # # print(hp)
+        # # print()
+        # # print(np.where(h != hp))
+        # assert np.array_equal(h, hp)
+
+        p = np.zeros(m, dtype=np.int32)
+        matcher.run(h + ord('0'), p)
 
         hp = H[p, np.arange(m)]
+
         # print(p)
         # print(h)
         # print(hp)
+
+        assert np.array_equal(h, hp)
+
         # print()
         # print(np.where(h != hp))
-        assert np.array_equal(h, hp)
+
 
 
     # for tree in ts.trees():

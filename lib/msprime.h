@@ -859,6 +859,7 @@ int tree_diff_iterator_alloc(tree_diff_iterator_t *self,
 int tree_diff_iterator_free(tree_diff_iterator_t *self);
 int tree_diff_iterator_next(tree_diff_iterator_t *self, double *length,
         node_record_t **nodes_out, node_record_t **nodes_in);
+int tree_diff_iterator_reset(tree_diff_iterator_t *self);
 void tree_diff_iterator_print_state(tree_diff_iterator_t *self, FILE *out);
 
 int sparse_tree_alloc(sparse_tree_t *self, tree_sequence_t *tree_sequence,

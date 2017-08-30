@@ -288,6 +288,7 @@ haplotype_matcher_reset(haplotype_matcher_t *self, node_id_t *samples,
     if (ret == 1) {
         ret = 0;
     }
+    tree_diff_iterator_reset(&self->diff_iterator);
     self->total_traceback_size = 0;
 out:
     return ret;
