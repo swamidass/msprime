@@ -812,6 +812,7 @@ def ancestral_sample_match_dev(n, seed):
 
         p = np.zeros(m, dtype=np.int32)
         matcher.run(h + ord('0'), p)
+        # print(matcher.mean_traceback_size)
 
         hp = H[p, np.arange(m)]
 

@@ -6047,6 +6047,26 @@ out:
 }
 #endif
 
+static PyObject *
+HaplotypeMatcher_get_mean_traceback_size(HaplotypeMatcher *self, void *closure)
+{
+    PyObject *ret = NULL;
+
+    if (HaplotypeMatcher_check_state(self) != 0) {
+        goto out;
+    }
+    ret = Py_BuildValue("d",
+            haplotype_matcher_get_mean_traceback_size(self->haplotype_matcher));
+out:
+    return ret;
+}
+
+static PyGetSetDef HaplotypeMatcher_getsetters[] = {
+    {"mean_traceback_size", (getter) HaplotypeMatcher_get_mean_traceback_size, NULL,
+        "The average size of the traceback over all sites."},
+    {NULL}  /* Sentinel */
+};
+
 static PyMemberDef HaplotypeMatcher_members[] = {
     {NULL}  /* Sentinel */
 };
@@ -6089,7 +6109,7 @@ static PyTypeObject HaplotypeMatcherType = {
     0,                     /* tp_iternext */
     HaplotypeMatcher_methods,             /* tp_methods */
     HaplotypeMatcher_members,             /* tp_members */
-    0,                         /* tp_getset */
+    HaplotypeMatcher_getsetters,          /* tp_getset */
     0,                         /* tp_base */
     0,                         /* tp_dict */
     0,                         /* tp_descr_get */
