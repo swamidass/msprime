@@ -622,6 +622,12 @@ typedef struct {
     tree_sequence_t *tree_sequence;
 } ld_calc_t;
 
+typedef struct _likelihood_list_t {
+    node_id_t node;
+    double likelihood;
+    struct _likelihood_list_t *next;
+} likelihood_list_t;
+
 typedef struct {
     tree_sequence_t *tree_sequence;
     double recombination_rate;
@@ -634,16 +640,12 @@ typedef struct {
     node_id_t *parent;
     double *likelihood;
     avl_tree_t likelihood_nodes;
-    node_id_t *recombination_dest;
-    node_list_t **traceback;
+    likelihood_list_t **traceback;
     object_heap_t avl_node_heap;
-    block_allocator_t node_list_allocator;
-    node_id_t *node_buffer;
-    double *likelihood_compression_buffer;
+    block_allocator_t likelihood_list_allocator;
     double *site_position;
     /* stats counters */
-    size_t total_likelihood_nodes;
-    size_t total_traceback_nodes;
+    size_t total_traceback_size;
 } haplotype_matcher_t;
 
 typedef struct {
@@ -919,8 +921,7 @@ int haplotype_matcher_free(haplotype_matcher_t *self);
 int haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
         node_id_t *samples, size_t num_samples, node_id_t *path);
 void haplotype_matcher_print_state(haplotype_matcher_t *self, FILE *out);
-double haplotype_matcher_get_mean_likelihood_nodes(haplotype_matcher_t *self);
-double haplotype_matcher_get_mean_traceback_nodes(haplotype_matcher_t *self);
+double haplotype_matcher_get_mean_traceback_size(haplotype_matcher_t *self);
 
 int hapgen_alloc(hapgen_t *self, tree_sequence_t *tree_sequence);
 int hapgen_get_haplotype(hapgen_t *self, node_id_t j, char **haplotype);

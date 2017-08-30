@@ -1099,7 +1099,7 @@ run_match(const char *filename, int verbose)
     haplotype_matcher_t matcher;
     int ret;
     bool check = true;
-    bool all_ones = true;
+    bool all_ones = false;
     /* TODO add a useful API for generating target haplotypes here. */
 
     load_tree_sequence(&ts, filename);
@@ -1150,10 +1150,6 @@ run_match(const char *filename, int verbose)
     if (ret != 0) {
         fatal_library_error(ret, "haplotype_matcher_run");
     }
-    ret = vargen_alloc(&vg, &ts, MSP_GENOTYPES_AS_CHAR);
-    if (ret != 0) {
-        fatal_library_error(ret, "vargen_alloc");
-    }
     if (verbose > 0) {
         printf("Path = ");
         for (j = 0; j < m; j++) {
@@ -1161,10 +1157,8 @@ run_match(const char *filename, int verbose)
         }
         printf("\n");
     }
-    printf("Mean likelihood nodes = %f\n",
-            haplotype_matcher_get_mean_likelihood_nodes(&matcher));
-    printf("Mean traceback nodes  = %f\n",
-            haplotype_matcher_get_mean_traceback_nodes(&matcher));
+    printf("Mean traceback size  = %f\n",
+            haplotype_matcher_get_mean_traceback_size(&matcher));
     if (verbose > 0) {
         haplotype_matcher_print_state(&matcher, stdout);
     }
