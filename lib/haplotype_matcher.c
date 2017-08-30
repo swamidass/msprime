@@ -685,7 +685,7 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
             goto out;
         }
         /* haplotype_matcher_print_state(self, stdout); */
-        haplotype_matcher_check_state(self);
+        /* haplotype_matcher_check_state(self); */
 
         ret = sparse_tree_get_sites(&self->tree, &sites, &num_sites);
         if (ret != 0) {
@@ -698,7 +698,7 @@ haplotype_matcher_run(haplotype_matcher_t *self, char *haplotype,
                 goto out;
             }
             /* haplotype_matcher_print_state(self, stdout); */
-            haplotype_matcher_check_state(self);
+            /* haplotype_matcher_check_state(self); */
         }
         ret = sparse_tree_next(&self->tree);
         if (ret < 0) {
