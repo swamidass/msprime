@@ -294,47 +294,339 @@ def is_descendent_at_site(ts, site_id, u, v):
 
 
 
+class NewHaplotypeMatcher(object):
+
+    def __init__(self, tree_sequence, recombination_rate):
+        self.tree_sequence = tree_sequence
+        self.recombination_rate = recombination_rate
+        self.num_sites = tree_sequence.num_sites
+
+    def get_max_likelihood_node(self, L):
+        """
+        Returns the node with the maxmimum likelihood from the specified map.
+        """
+        u = -1
+        max_likelihood = -1
+        for node, likelihood in L.items():
+            if likelihood > max_likelihood:
+                u = node
+                max_likelihood = likelihood
+        assert u != -1
+        return u
+
+    def run(self, h):
+        print("Find path for ", h)
+        ts = self.tree_sequence
+        n = ts.num_nodes
+        m = ts.num_sites
+        pi = np.zeros(n, dtype=int) - 1
+        L = np.zeros(n) - 1
+        L_nodes = set()
+        traceback = [dict(L) for _ in range(m)]
+
+        # Initialise the L values.
+        for u in ts.samples():
+            L[u] = 1.0
+            L_nodes.add(u)
+
+        pi = np.zeros(n, dtype=int) - 1
+        left = 0
+        for diff in ts.diffs():
+            length, records_out, records_in = diff
+            right = left + length
+            for parent, children, _ in records_out:
+                for child in children:
+                    pi[child] = -1
+                    if L[child] == -1:
+                        # If the child does not already have a u value, traverse
+                        # upwards until we find an L value for u
+                        u = parent
+                        while L[u] == -1:
+                            u = pi[u]
+                        L[child] = L[u]
+            for parent, children, _ in records_in:
+
+                # Traverse upwards until we find the L value for the parent.
+                u = parent
+                while u != msprime.NULL_NODE and u not in L:
+                    u = pi[u]
+
+                for child in children:
+                    pi[child] = parent
+                print("u",
+                # The child must have an L value. If it is the same as the parent
+                # we can delete it.
+                if L[child] == L[u]:
+                    del L[child]
+
+            print("Done tree update", left, right)
+            print(pi)
+            print(L)
+
+            for site in range(left, right):
+                state = h[site]
+                if site not in self.tree_sequence_builder.mutations:
+                    if state == 0:
+                        assert len(L) > 0
+                    traceback[site] = dict(L)
+                    if site > 0 and (site - 1) not in self.tree_sequence_builder.mutations:
+                        assert traceback[site] == traceback[site - 1]
+                    continue
+                mutation_node = self.tree_sequence_builder.mutations[site]
+                # print("Site ", site, "mutation = ", mutation_node, "state = ", state)
+
+                # Insert an new L-value for the mutation node if needed.
+                if mutation_node not in L:
+                    u = mutation_node
+                    while u not in L:
+                        u = pi[u]
+                    L[mutation_node] = L[u]
+                traceback[site] = dict(L)
+
+                # Update the likelihoods for this site.
+                max_L = -1
+                for v in L.keys():
+                    x = L[v] * no_recomb_proba
+                    assert x >= 0
+                    y = recomb_proba
+                    if x > y:
+                        z = x
+                    else:
+                        z = y
+                    if state == 1:
+                        emission_p = int(is_descendant(pi, v, mutation_node))
+                    else:
+                        emission_p = int(not is_descendant(pi, v, mutation_node))
+                    L[v] = z * emission_p
+                    if L[v] > max_L:
+                        max_L = L[v]
+                assert max_L > 0
+
+                # Normalise
+                for v in L.keys():
+                    L[v] /= max_L
+
+                # Compress
+                # TODO we probably don't need the second dict here and can just take
+                # a copy of the keys.
+                L_next = {}
+                for u in L.keys():
+                    if pi[u] != -1:
+                        # Traverse upwards until we find another L value
+                        v = pi[u]
+                        while v not in L:
+                            v = pi[v]
+                        if L[u] != L[v]:
+                            L_next[u] = L[u]
+                    else:
+                        L_next[u] = L[u]
+                L = L_next
+
+            right = left
+
+    def find_path_old(self, h):
+
+        # print("best_path", h)
+
+        M = len(self.tree_sequence_builder.edges)
+        I = self.tree_sequence_builder.insertion_order
+        O = self.tree_sequence_builder.removal_order
+        n = self.tree_sequence_builder.num_nodes
+        m = self.tree_sequence_builder.num_sites
+        pi = np.zeros(n, dtype=int) - 1
+        L = {u: 1.0 for u in range(n)}
+        traceback = [dict(L) for _ in range(m)]
+        edges = self.tree_sequence_builder.edges
+
+        r = 1 - np.exp(-self.recombination_rate / n)
+        recomb_proba = r / n
+        no_recomb_proba = 1 - r + r / n
+
+        j = 0
+        k = 0
+        while j < M:
+            left = edges[I[j]].left
+            while edges[O[k]].right == left:
+                parent = edges[O[k]].parent
+                child = edges[O[k]].child
+                k = k + 1
+                pi[child] = -1
+                if child not in L:
+                    # If the child does not already have a u value, traverse
+                    # upwards until we find an L value for u
+                    u = parent
+                    while u not in L:
+                        u = pi[u]
+                    L[child] = L[u]
+            right = edges[O[k]].right
+            while j < M and edges[I[j]].left == left:
+                parent = edges[I[j]].parent
+                child = edges[I[j]].child
+                # print("INSERT", parent, child)
+                pi[child] = parent
+                j += 1
+                # Traverse upwards until we find the L value for the parent.
+                u = parent
+                while u not in L:
+                    u = pi[u]
+                # The child must have an L value. If it is the same as the parent
+                # we can delete it.
+                if L[child] == L[u]:
+                    del L[child]
+
+            # print("END OF TREE LOOP", left, right)
+            # print("left = ", left)
+            # print("right = ", right)
+            # print(L)
+            # print(pi)
+            for site in range(left, right):
+                state = h[site]
+                if site not in self.tree_sequence_builder.mutations:
+                    if state == 0:
+                        assert len(L) > 0
+                    traceback[site] = dict(L)
+                    if site > 0 and (site - 1) not in self.tree_sequence_builder.mutations:
+                        assert traceback[site] == traceback[site - 1]
+                    continue
+                mutation_node = self.tree_sequence_builder.mutations[site]
+                # print("Site ", site, "mutation = ", mutation_node, "state = ", state)
+
+                # Insert an new L-value for the mutation node if needed.
+                if mutation_node not in L:
+                    u = mutation_node
+                    while u not in L:
+                        u = pi[u]
+                    L[mutation_node] = L[u]
+                traceback[site] = dict(L)
+
+                # Update the likelihoods for this site.
+                max_L = -1
+                for v in L.keys():
+                    x = L[v] * no_recomb_proba
+                    assert x >= 0
+                    y = recomb_proba
+                    if x > y:
+                        z = x
+                    else:
+                        z = y
+                    if state == 1:
+                        emission_p = int(is_descendant(pi, v, mutation_node))
+                    else:
+                        emission_p = int(not is_descendant(pi, v, mutation_node))
+                    L[v] = z * emission_p
+                    if L[v] > max_L:
+                        max_L = L[v]
+                assert max_L > 0
+
+                # Normalise
+                for v in L.keys():
+                    L[v] /= max_L
+
+                # Compress
+                # TODO we probably don't need the second dict here and can just take
+                # a copy of the keys.
+                L_next = {}
+                for u in L.keys():
+                    if pi[u] != -1:
+                        # Traverse upwards until we find another L value
+                        v = pi[u]
+                        while v not in L:
+                            v = pi[v]
+                        if L[u] != L[v]:
+                            L_next[u] = L[u]
+                    else:
+                        L_next[u] = L[u]
+                L = L_next
+
+        # print("LIKELIHOODS")
+        # for l in range(self.num_sites):
+        #     print("\t", l, traceback[l])
+
+
+
+        u = self.get_max_likelihood_node(L)
+        output_edge = Edge(right=m, parent=u)
+        output_edges = [output_edge]
+
+        # Now go back through the trees.
+        j = M - 1
+        k = M - 1
+        I = self.tree_sequence_builder.removal_order
+        O = self.tree_sequence_builder.insertion_order
+        while j >= 0:
+            right = edges[I[j]].right
+            while edges[O[k]].left == right:
+                pi[edges[O[k]].child] = -1
+                k -= 1
+            left = edges[O[k]].left
+            while j >= 0 and edges[I[j]].right == right:
+                pi[edges[I[j]].child] = edges[I[j]].parent
+                j -= 1
+            for l in range(right - 1, max(left - 1, 0), -1):
+                u = output_edge.parent
+                L = traceback[l]
+                v = u
+                while v not in L:
+                    v = pi[v]
+                x = L[v]
+                # TODO check this approximately!!
+                if x != 1.0:
+                    output_edge.left = l
+                    u = self.get_max_likelihood_node(L)
+                    output_edge = Edge(right=l, parent=u)
+                    output_edges.append(output_edge)
+                assert l > 0
+        # For now we hack in mismatches by seeing if the input haplotype
+        # is 1 and there are no mutations. We should check to see if the chosen
+        # node is a descendent of the mutation node (if it exists).
+        self.mean_traceback_size = sum(len(t) for t in traceback) / self.num_sites
+        output_edge.left = 0
+
+        mismatches = []
+        for e in output_edges:
+            for l in range(e.left, e.right):
+                if h[l] == 1 and l not in self.tree_sequence_builder.mutations:
+                    mismatches.append(l)
+        left = np.zeros(len(output_edges), dtype=np.uint32)
+        right = np.zeros(len(output_edges), dtype=np.uint32)
+        parent = np.zeros(len(output_edges), dtype=np.int32)
+        for j, e in enumerate(output_edges):
+            left[j] = e.left
+            right[j] = e.right
+            parent[j] = e.parent
+        return (left, right, parent), np.array(mismatches, dtype=np.uint32)
+
+
+
 class HaplotypeMatcher(object):
 
-    def __init__(self, tree_sequence, recombination_rate, samples=None):
+    def __init__(self, tree_sequence, recombination_rate):
         self.tree_sequence = tree_sequence
         self.tree = None
-        if samples is None:
-            samples = list(self.tree_sequence.samples())
-        self.samples = samples
+        self.samples = list(self.tree_sequence.samples())
         self.num_sites = tree_sequence.num_sites
         self.num_nodes = tree_sequence.num_nodes
         self.recombination_rate = recombination_rate
-        # Map of tree nodes to likelihoods. We maintain the property that the
-        # nodes in this map are non-overlapping; that is, for any u in the map,
-        # there is no v that is an ancestor of u.
+
+        # Map of tree nodes to likelihoods.
         self.likelihood = np.zeros(self.num_nodes) - 1
         # This is the set of nodes that are currently set in the likelihood map.
         self.likelihood_nodes = set()
         # We keep a local copy of the parent array to allow us maintain the
         # likelihood map between tree transitions.
         self.parent = np.zeros(self.num_nodes, dtype=int) - 1
-        # For each locus, store a set of nodes at which we must recombine during
-        # traceback.
         self.traceback = [[] for _ in range(self.num_sites)]
-        # If we recombine during traceback, this is the node we recombine to.
-        self.recombination_dest = np.zeros(self.num_sites, dtype=int) - 1
-        # This is the buffer used to propagate L values up the tree.
-        self.compression_buffer = np.zeros(self.num_nodes, dtype=int) - 1
 
-    def reset(self, samples):
+    def reset(self):
         self.likelihood_nodes = set()
         self.likelihood[:] = -1
         for u in self.samples:
             self.likelihood_nodes.add(u)
             self.likelihood[u] = 0.0
-        for u in samples:
-            self.likelihood[u] = 1.0
         self.parent[:] = -1
         self.traceback = [[] for _ in range(self.num_sites)]
-        self.recombination_dest[:] = -1
 
-    def print_state(self, traceback=True):
+    def print_state(self):
         print("HaplotypeMatcher state")
         print("likelihood:")
         for u in sorted(self.likelihood_nodes):
@@ -344,26 +636,9 @@ class HaplotypeMatcher(object):
             print("\tindex = ", self.tree.index)
             print("\tnum_sites = ", len(list(self.tree.sites())))
             print("\tp = ", self.tree.parent_dict)
-        if traceback:
-            print("Traceback:")
-            for l in range(self.num_sites):
-                print("\t", l, "\t", self.recombination_dest[l], "\t", self.traceback[l])
-
-    def check_sample_coverage(self, nodes):
-        """
-        Ensures that all the samples from the specified tree are covered by the
-        set of nodes.
-        """
-        samples = set()
-        for u in nodes:
-            # TODO assuming here that all nodes are samples.
-            # subtree_samples = set(self.tree.nodes(u))
-            subtree_samples = set(self.tree.leaves(u))
-            assert len(subtree_samples & samples) == 0
-            samples |= subtree_samples
-        print("nodes = ", nodes)
-        print("samples = ", samples)
-        assert samples == set(self.tree_sequence.samples())
+        print("Traceback:")
+        for l in range(self.num_sites):
+            print("\t", l, self.traceback[l])
 
     def check_partial_tree_consistency(self):
         """
@@ -700,42 +975,40 @@ def copy_process_dev(n, L, seed):
     for v in ts.variants():
         H[:, v.index] = v.genotypes
 
-    matcher = HaplotypeMatcher(ts, recombination_rate=1e-8)
+    matcher = NewHaplotypeMatcher(ts, recombination_rate=1e-8)
     # matcher = _msprime.HaplotypeMatcher(ts._ll_tree_sequence,
     #         recombination_rate=1e-8, mutation_rate=1e-8)
     p = np.zeros(m, dtype=np.int32)
 
     # print(H)
-    for j in range(n):
-        # h = random_mosaic(H) + ord('0')
-        # print(h)
+    for j in range(1):
+        h = random_mosaic(H)
+        print(h)
         # h = np.hstack([H[0,:10], H[1,10:]])
         # print()
         # print(h)
-        h = H[j]
-        H_minus = np.vstack([H[:j], H[j + 1:]])
         # print(H_minus)
-        p, mismatches, L = best_path(h, H_minus, 1e-8)
-        print("mismatches = ", mismatches)
+        # p, mismatches, L = best_path(h, H_minus, 1e-8)
+        # print("mismatches = ", mismatches)
         # p = best_path_ts(h, ts, 1e-8)
         # before = time.clock()
-        matcher.run([k for k in range(n) if k != j], h, p)
+        matcher.run(h)
         # duration = time.clock() - before
         # print("Done in {} seconds".format(duration))
 
         # hp = H[p, np.arange(m)] + ord('0')
-        print(p)
-        hp = H_minus[p, np.arange(m)]
-        for l in mismatches:
-            assert hp[l] != h[l]
-            hp[l] = h[l]
-        print(h)
-        print(hp)
+        # print(p)
+        # # hp = H_minus[p, np.arange(m)]
+        # # for l in mismatches:
+        # #     assert hp[l] != h[l]
+        # #     hp[l] = h[l]
+        # print(h)
+        # print(hp)
         # print("p = ", p)
         # print()
         # print(h - ord('0'))
         # print(hp - ord('0'))
-        assert np.array_equal(h, hp)
+        # assert np.array_equal(h, hp)
 
 
 def compress_likelihoods(tree, L):
@@ -841,13 +1114,13 @@ def main():
     # for j in range(1, 10000):
     #     print(j)
     #     copy_process_dev(100, 2000, j)
-    # copy_process_dev(10, 4, 4)
+    copy_process_dev(10, 4, 4)
     # for n in [10, 100, 1000, 10**4, 10**5]:
     #     copy_process_dev(n, 10000, 4)
     # for seed in range(1, 10000):
     #     print(seed)
     #     ancestral_sample_match_dev(500, seed)
-    ancestral_sample_match_dev(5, 1)
+    # ancestral_sample_match_dev(5, 1)
 
 
 
