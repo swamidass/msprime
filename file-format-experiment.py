@@ -25,7 +25,18 @@ type_to_np_dtype_map = {t: dtype for dtype, t in np_dtype_to_type_map.items()}
 class ItemDescriptor(object):
     """
     The information required to recover a single key-value pair from the
-    file.
+    file. Each descriptor is a block of 64 bytes, which stores:
+
+    - The numeric type of the array (similar to numpy dtype)
+    - The start offset of the key
+    - The length of the key
+    - The start offset of the array
+    - The length of the array
+
+    File offsets are stored as 8 byte unsigned little endian integers.
+    The remaining space in the descriptor is reserved for later use.
+    For example, we may wish to add an 'encoding' field in the future,
+    which allows for things like simple run-length encoding and so on.
     """
     size = 64
 
@@ -45,6 +56,7 @@ class ItemDescriptor(object):
 
     def pack(self):
         descriptor = bytearray(64)
+        # It's a bit ridiclous having 4 bytes for the type really.
         descriptor[0:4] = struct.pack("<I", self.type)
         descriptor[4:12] = struct.pack("<Q", self.key_start)
         descriptor[12:20] = struct.pack("<Q", self.key_len)
@@ -80,34 +92,30 @@ def write_arrays(filename, arrays):
 
         # We store the keys in sorted order.
         sorted_keys = sorted(arrays.keys())
-        total_keylen = sum(len(key) for key in sorted_keys)
         descriptor_block_size = num_items * ItemDescriptor.size
-        key_start = header_size + descriptor_block_size
-        array_start = key_start + total_keylen
+        offset = header_size + descriptor_block_size
         descriptors = []
         for key, array in arrays.items():
             assert len(array.shape) == 1  # Only 1D arrays supported.
+            key_start = offset
+            array_start = key_start + len(key) # TODO Add padding to 8-align
             descriptor = ItemDescriptor(
                 np_dtype_to_type_map[array.dtype.name],
                 key_start, len(key), array_start, array.nbytes)
             descriptor.key = key
             descriptor.array = array
-            key_start += len(key)
-            array_start += array.nbytes
             descriptors.append(descriptor)
+            offset = array_start + array.nbytes  # TODO Add padding to 8-align
 
         assert f.tell() == header_size
         # Now write the descriptors.
         for descriptor in descriptors:
             f.write(descriptor.pack())
 
-        # Write the keys
+        # Write the keys and arrays
         for descriptor in descriptors:
             assert f.tell() == descriptor.key_start
             f.write(descriptor.key.encode())
-
-        # Write the arrays
-        for descriptor in descriptors:
             assert f.tell() == descriptor.array_start
             f.write(descriptor.array.data)
 
@@ -116,7 +124,6 @@ def read_arrays(filename):
     """
     Reads arrays from the specified file and returns the resulting mapping.
     """
-    print("READ")
     with open(filename, "rb") as f:
         header_size = 64
         header = f.read(header_size)
@@ -124,7 +131,6 @@ def read_arrays(filename):
             raise ValueError("Incorrect file format")
         version_major = struct.unpack("<I", header[8:12])[0]
         version_minor = struct.unpack("<I", header[12:16])[0]
-        print("version_major = ", version_major)
         if version_major != VERSION_MAJOR:
             raise ValueError("Incompatible major version")
         num_items = struct.unpack("<I", header[16:20])[0]
@@ -140,22 +146,18 @@ def read_arrays(filename):
             descriptors.append(descriptor)
             offset += ItemDescriptor.size
 
-        keys = []
+        items = {}
         for descriptor in descriptors:
+            # TODO change this to seek to the start addresses and therefore
+            # skip padding.
             assert f.tell() == descriptor.key_start
-            keys.append(f.read(descriptor.key_len).decode())
-
-        arrays = []
-        for descriptor in descriptors:
+            descriptor.key = f.read(descriptor.key_len).decode()
             assert f.tell() == descriptor.array_start
             dtype = type_to_np_dtype_map[descriptor.type]
             data = f.read(descriptor.array_len)
-            array = np.frombuffer(data, dtype=dtype)
-            arrays.append(array)
-        return dict(zip(keys, arrays))
-
-
-
+            descriptor.array = np.frombuffer(data, dtype=dtype)
+            items[descriptor.key] = descriptor.array
+        return items
 
 
 def main():
@@ -171,9 +173,10 @@ def main():
 
     other = read_arrays(filename)
     assert list(other.keys()) == list(arrays.keys())
+    print("read:")
     for k in other.keys():
         assert np.array_equal(arrays[k], other[k])
-
+        print(k, "->", other[k])
 
 
 
