@@ -29,7 +29,7 @@
 #include "argtable3.h"
 
 #include "msprime.h"
-#include "err.h"
+#include "util.h"
 
 /* This file defines a crude CLI for msprime. It is intended for development
  * use only.

@@ -5894,6 +5894,53 @@ test_save_hdf5(void)
 }
 
 static void
+test_save_hdf5_tables(void)
+{
+    int ret;
+    size_t j, k;
+    tree_sequence_t **examples = get_example_tree_sequences(1);
+    tree_sequence_t ts2;
+    tree_sequence_t *ts1;
+    table_collection_t t1, t2;
+    int dump_flags[] = {0, MSP_DUMP_ZLIB_COMPRESSION};
+
+    CU_ASSERT_FATAL(examples != NULL);
+
+    for (j = 0; examples[j] != NULL; j++) {
+        ts1 = examples[j];
+        ret = table_collection_alloc(&t1, 0);
+        CU_ASSERT_EQUAL_FATAL(ret, 0);
+        ret = tree_sequence_dump_tables(ts1, &t1.nodes, &t1.edges, &t1.migrations,
+                &t1.sites, &t1.mutations, &t1.provenances, MSP_ALLOC_TABLES);
+        CU_ASSERT_EQUAL_FATAL(ret, 0);
+        t1.sequence_length = ts1->sequence_length;
+        for (k = 0; k < sizeof(dump_flags) / sizeof(int); k++) {
+            ret = table_collection_dump(&t1, _tmp_file_name, dump_flags[k]);
+            CU_ASSERT_EQUAL_FATAL(ret, 0);
+
+            ret = table_collection_alloc(&t2, 0);
+            CU_ASSERT_EQUAL_FATAL(ret, 0);
+            ret = table_collection_load(&t2, _tmp_file_name, 0);
+            CU_ASSERT_EQUAL_FATAL(ret, 0);
+
+            ret = tree_sequence_initialise(&ts2);
+            CU_ASSERT_EQUAL_FATAL(ret, 0);
+            ret = tree_sequence_load_tables(&ts2, t2.sequence_length, &t2.nodes, &t2.edges,
+                    &t2.migrations, &t2.sites, &t2.mutations, &t2.provenances, 0);
+            CU_ASSERT_EQUAL_FATAL(ret, 0);
+            verify_tree_sequences_equal(ts1, &ts2, true, true, true);
+
+            tree_sequence_free(&ts2);
+            table_collection_free(&t2);
+        }
+        table_collection_free(&t1);
+        tree_sequence_free(ts1);
+        free(ts1);
+    }
+    free(examples);
+}
+
+static void
 test_sort_tables(void)
 {
     int ret;
@@ -7237,6 +7284,7 @@ main(int argc, char **argv)
         {"test_simplify_from_examples", test_simplify_from_examples},
         {"test_save_empty_hdf5", test_save_empty_hdf5},
         {"test_save_hdf5", test_save_hdf5},
+        {"test_save_hdf5_tables", test_save_hdf5_tables},
         {"test_dump_tables", test_dump_tables},
         {"test_sort_tables", test_sort_tables},
         {"test_dump_tables_hdf5", test_dump_tables_hdf5},
