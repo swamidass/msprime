@@ -1035,6 +1035,11 @@ out:
     return ret;
 }
 
+/* TODO this will be replaced with a version in which we take a table_collection_t
+ * instance as the main argument. When this is done, we can remove the
+ * indexing code here. Then, if the table_collection_t has not been indexed,
+ * we can run index on the internal table_collection. Otherwise we can just
+ * copy the index in directly. */
 int WARN_UNUSED
 tree_sequence_load_tables(tree_sequence_t *self, double sequence_length,
     node_table_t *nodes, edge_table_t *edges, migration_table_t *migrations,
@@ -1383,6 +1388,17 @@ tree_sequence_load(tree_sequence_t *self, const char *filename, int flags)
     ret = tree_sequence_load_tables(self, tables.sequence_length,
             &tables.nodes, &tables.edges, &tables.migrations, &tables.sites,
             &tables.mutations, &tables.provenances, 0);
+    if (ret != 0) {
+        goto out;
+    }
+    /* FIXME To make sure that the new code for computing indexes works
+     * correctly, write over the existing indexes. This is temporary
+     * until the tree sequence uses a table_collection instance for storage. */
+    memcpy(self->edges.indexes.insertion_order, tables.indexes.edge_insertion_order,
+            tables.edges.num_rows * sizeof(edge_id_t));
+    memcpy(self->edges.indexes.removal_order, tables.indexes.edge_removal_order,
+            tables.edges.num_rows * sizeof(edge_id_t));
+
 out:
     table_collection_free(&tables);
     return ret;

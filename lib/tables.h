@@ -118,6 +118,10 @@ typedef struct {
     site_table_t sites;
     mutation_table_t mutations;
     provenance_table_t provenances;
+    struct {
+        edge_id_t *edge_insertion_order;
+        edge_id_t *edge_removal_order;
+    } indexes;
     /* TODO Add in reserved space for future tables. */
 } table_collection_t;
 
@@ -341,6 +345,7 @@ bool provenance_table_equal(provenance_table_t *self, provenance_table_t *other)
 
 int table_collection_alloc(table_collection_t *self, int flags);
 int table_collection_print_state(table_collection_t *self, FILE *out);
+int table_collection_build_indexes(table_collection_t *self, int flags);
 int table_collection_load(table_collection_t *self, const char *filename, int flags);
 int table_collection_dump(table_collection_t *tables, const char *filename, int flags);
 int table_collection_free(table_collection_t *self);

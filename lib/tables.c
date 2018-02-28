@@ -34,6 +34,32 @@
 
 #define TABLE_SEP "-----------------------------------------\n"
 
+typedef struct {
+    node_id_t index;
+    /* These are the sort keys in order */
+    double first;
+    double second;
+    node_id_t third;
+    node_id_t fourth;
+} index_sort_t;
+
+static int
+cmp_index_sort(const void *a, const void *b) {
+    const index_sort_t *ca = (const index_sort_t *) a;
+    const index_sort_t *cb = (const index_sort_t *) b;
+    int ret = (ca->first > cb->first) - (ca->first < cb->first);
+    if (ret == 0) {
+        ret = (ca->second > cb->second) - (ca->second < cb->second);
+        if (ret == 0) {
+            ret = (ca->third > cb->third) - (ca->third < cb->third);
+            if (ret == 0) {
+                ret = (ca->fourth > cb->fourth) - (ca->fourth < cb->fourth);
+            }
+        }
+    }
+    return ret;
+}
+
 static int
 cmp_edge_cl(const void *a, const void *b) {
     const edge_t *ia = (const edge_t *) a;
@@ -3701,6 +3727,14 @@ hdf5_file_read_dimensions(hdf5_file_t *self, hid_t file_id)
     if (ret != 0) {
         goto out;
     }
+    /* Alloc the indexes */
+    self->tables->indexes.edge_insertion_order = malloc(num_edges * sizeof(edge_id_t));
+    self->tables->indexes.edge_removal_order = malloc(num_edges * sizeof(edge_id_t));
+    if (self->tables->indexes.edge_insertion_order == NULL
+            || self->tables->indexes.edge_removal_order == NULL) {
+        ret = MSP_ERR_NO_MEMORY;
+        goto out;
+    }
     ret = 0;
 out:
     return ret;
@@ -3744,9 +3778,8 @@ hdf5_file_check_dimensions(hdf5_file_t *self, hid_t file_id)
         {"/edges/right", self->tables->edges.num_rows},
         {"/edges/parent", self->tables->edges.num_rows},
         {"/edges/child", self->tables->edges.num_rows},
-        /* FIXME!! */
-        /* {"/edges/indexes/insertion_order", self->tables->edges.num_rows}, */
-        /* {"/edges/indexes/removal_order", self->tables->edges.num_rows}, */
+        {"/edges/indexes/insertion_order", self->tables->edges.num_rows},
+        {"/edges/indexes/removal_order", self->tables->edges.num_rows},
 
         {"/migrations/left", self->tables->migrations.num_rows},
         {"/migrations/right", self->tables->migrations.num_rows},
@@ -3851,11 +3884,10 @@ hdf5_file_read_data(hdf5_file_t *self, hid_t file_id)
         {"/edges/parent", H5T_NATIVE_INT32, self->tables->edges.parent},
         {"/edges/child", H5T_NATIVE_INT32, self->tables->edges.child},
 
-        /* FIXME */
-        /* {"/edges/indexes/insertion_order", H5T_NATIVE_INT32, */
-        /*     self->tables->edges.indexes.insertion_order}, */
-        /* {"/edges/indexes/removal_order", H5T_NATIVE_INT32, */
-        /*     self->tables->edges.indexes.removal_order}, */
+        {"/edges/indexes/insertion_order", H5T_NATIVE_INT32,
+            self->tables->indexes.edge_insertion_order},
+        {"/edges/indexes/removal_order", H5T_NATIVE_INT32,
+            self->tables->indexes.edge_removal_order},
 
         {"/migrations/left", H5T_NATIVE_DOUBLE, self->tables->migrations.left},
         {"/migrations/right", H5T_NATIVE_DOUBLE, self->tables->migrations.right},
@@ -3988,13 +4020,12 @@ hdf5_file_write_hdf5_data(hdf5_file_t *self, hid_t file_id, int flags)
             H5T_STD_I32LE, H5T_NATIVE_INT32,
             self->tables->edges.num_rows, self->tables->edges.child},
 
-        /*FIXME */
-/*         {"/edges/indexes/insertion_order", */
-/*             H5T_STD_I32LE, H5T_NATIVE_INT32, */
-/*             self->tables->edges.num_rows, self->tables->edges.indexes.insertion_order}, */
-/*         {"/edges/indexes/removal_order", */
-/*             H5T_STD_I32LE, H5T_NATIVE_INT32, */
-/*             self->tables->edges.num_rows, self->tables->edges.indexes.removal_order}, */
+        {"/edges/indexes/insertion_order",
+            H5T_STD_I32LE, H5T_NATIVE_INT32,
+            self->tables->edges.num_rows, self->tables->indexes.edge_insertion_order},
+        {"/edges/indexes/removal_order",
+            H5T_STD_I32LE, H5T_NATIVE_INT32,
+            self->tables->edges.num_rows, self->tables->indexes.edge_removal_order},
 
         {"/sites/position",
             H5T_IEEE_F64LE, H5T_NATIVE_DOUBLE,
@@ -4299,16 +4330,78 @@ table_collection_free(table_collection_t *self)
     site_table_free(&self->sites);
     mutation_table_free(&self->mutations);
     provenance_table_free(&self->provenances);
+    msp_safe_free(self->indexes.edge_insertion_order);
+    msp_safe_free(self->indexes.edge_removal_order);
     return ret;
 }
 
-int
-table_collection_load(table_collection_t *tables, const char *filename, int flags)
+int WARN_UNUSED
+table_collection_build_indexes(table_collection_t *self, int flags)
+{
+    int ret = MSP_ERR_GENERIC;
+    size_t j;
+    double *time = self->nodes.time;
+    index_sort_t *sort_buff = NULL;
+
+    /* Alloc the indexes. Free them first if they aren't NULL. */
+    msp_safe_free(self->indexes.edge_insertion_order);
+    msp_safe_free(self->indexes.edge_removal_order);
+    self->indexes.edge_insertion_order = malloc(self->edges.num_rows * sizeof(edge_id_t));
+    self->indexes.edge_removal_order = malloc(self->edges.num_rows * sizeof(edge_id_t));
+    if (self->indexes.edge_insertion_order == NULL
+            || self->indexes.edge_removal_order == NULL) {
+        ret = MSP_ERR_NO_MEMORY;
+        goto out;
+    }
+
+    /* Alloc the sort buffer */
+    sort_buff = malloc(self->edges.num_rows * sizeof(index_sort_t));
+    if (sort_buff == NULL) {
+        ret = MSP_ERR_NO_MEMORY;
+        goto out;
+    }
+
+    /* sort by left and increasing time to give us the order in which
+     * records should be inserted */
+    for (j = 0; j < self->edges.num_rows; j++) {
+        sort_buff[j].index = (node_id_t ) j;
+        sort_buff[j].first = self->edges.left[j];
+        sort_buff[j].second = time[self->edges.parent[j]];
+        sort_buff[j].third = self->edges.parent[j];
+        sort_buff[j].fourth = self->edges.child[j];
+    }
+    qsort(sort_buff, self->edges.num_rows, sizeof(index_sort_t), cmp_index_sort);
+    for (j = 0; j < self->edges.num_rows; j++) {
+        self->indexes.edge_insertion_order[j] = sort_buff[j].index;
+    }
+    /* sort by right and decreasing parent time to give us the order in which
+     * records should be removed. */
+    for (j = 0; j < self->edges.num_rows; j++) {
+        sort_buff[j].index = (node_id_t ) j;
+        sort_buff[j].first = self->edges.right[j];
+        sort_buff[j].second = -time[self->edges.parent[j]];
+        sort_buff[j].third = -self->edges.parent[j];
+        sort_buff[j].fourth = -self->edges.child[j];
+    }
+    qsort(sort_buff, self->edges.num_rows, sizeof(index_sort_t), cmp_index_sort);
+    for (j = 0; j < self->edges.num_rows; j++) {
+        self->indexes.edge_removal_order[j] = sort_buff[j].index;
+    }
+    ret = 0;
+out:
+    if (sort_buff != NULL) {
+        free(sort_buff);
+    }
+    return ret;
+}
+
+int WARN_UNUSED
+table_collection_load(table_collection_t *self, const char *filename, int flags)
 {
     int ret = 0;
     hdf5_file_t hdf5_file;
 
-    ret = hdf5_file_alloc(&hdf5_file, tables);
+    ret = hdf5_file_alloc(&hdf5_file, self);
     if (ret != 0) {
         goto out;
     }
@@ -4321,13 +4414,17 @@ out:
     return ret;
 }
 
-int
-table_collection_dump(table_collection_t *tables, const char *filename, int flags)
+int WARN_UNUSED
+table_collection_dump(table_collection_t *self, const char *filename, int flags)
 {
     int ret = 0;
     hdf5_file_t hdf5_file;
 
-    ret = hdf5_file_alloc(&hdf5_file, tables);
+    ret = table_collection_build_indexes(self, 0);
+    if (ret != 0) {
+        goto out;
+    }
+    ret = hdf5_file_alloc(&hdf5_file, self);
     if (ret != 0) {
         goto out;
     }
@@ -4339,4 +4436,3 @@ out:
     hdf5_file_free(&hdf5_file);
     return ret;
 }
-
