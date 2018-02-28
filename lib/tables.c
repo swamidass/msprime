@@ -4297,6 +4297,10 @@ out:
     return ret;
 }
 
+/*************************
+ * table_collection
+ *************************/
+
 int
 table_collection_print_state(table_collection_t *self, FILE *out)
 {
@@ -4316,6 +4320,34 @@ table_collection_alloc(table_collection_t *self, int flags)
 {
     int ret = 0;
     memset(self, 0, sizeof(*self));
+    if (flags & MSP_ALLOC_TABLES) {
+        /* Allocate all the tables with their default increments */
+        ret = node_table_alloc(&self->nodes, 0, 0);
+        if (ret != 0) {
+            goto out;
+        }
+        ret = edge_table_alloc(&self->edges, 0);
+        if (ret != 0) {
+            goto out;
+        }
+        ret = migration_table_alloc(&self->migrations, 0);
+        if (ret != 0) {
+            goto out;
+        }
+        ret = site_table_alloc(&self->sites, 0, 0, 0);
+        if (ret != 0) {
+            goto out;
+        }
+        ret = mutation_table_alloc(&self->mutations, 0, 0, 0);
+        if (ret != 0) {
+            goto out;
+        }
+        ret = provenance_table_alloc(&self->provenances, 0, 0, 0);
+        if (ret != 0) {
+            goto out;
+        }
+    }
+out:
     return ret;
 }
 
